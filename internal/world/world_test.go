@@ -1,10 +1,12 @@
 package world
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/jason9075/agents_of_dynasties/internal/entity"
 	"github.com/jason9075/agents_of_dynasties/internal/hex"
+	"github.com/jason9075/agents_of_dynasties/internal/terrain"
 )
 
 func TestNewWorld_TileCount(t *testing.T) {
@@ -69,5 +71,169 @@ func TestVisibleTo_OwnEntitiesAlwaysVisible(t *testing.T) {
 	}
 	if len(ownBuildings) == 0 {
 		t.Error("expected own buildings to be visible")
+	}
+}
+
+func TestNewWorld_StrategicResourcesNearTownCenters(t *testing.T) {
+	w := NewWorld(42)
+
+	for _, team := range []entity.Team{entity.Team1, entity.Team2} {
+		tc := mustTownCenterPos(t, w, team)
+		for _, kind := range []terrain.Type{terrain.GoldMine, terrain.StoneMine, terrain.Orchard, terrain.Deer} {
+			if !hasTerrainWithin(w, tc, 5, kind) {
+				t.Fatalf("team %d town center at %v missing %s within 5 tiles", team, tc, kind.String())
+			}
+		}
+	}
+}
+
+func TestNewWorld_StrategicResourcesAreNotAdjacent(t *testing.T) {
+	w := NewWorld(42)
+
+	var resources []terrain.Tile
+	for _, tile := range w.AllTiles() {
+		switch tile.Terrain {
+		case terrain.GoldMine, terrain.StoneMine, terrain.Orchard, terrain.Deer:
+			resources = append(resources, tile)
+		}
+	}
+
+	for i := range resources {
+		for j := i + 1; j < len(resources); j++ {
+			if hex.Distance(resources[i].Coord, resources[j].Coord) <= 1 {
+				t.Fatalf("strategic resources adjacent: %v at %v and %v at %v",
+					resources[i].Terrain, resources[i].Coord, resources[j].Terrain, resources[j].Coord)
+			}
+		}
+	}
+}
+
+func TestNewWorld_StrategicResourcesAreNotAdjacentToForest(t *testing.T) {
+	w := NewWorld(42)
+
+	for _, tile := range w.AllTiles() {
+		if !isStrategicResource(tile.Terrain) {
+			continue
+		}
+		for _, neighbor := range hex.Circle(tile.Coord, 1) {
+			if neighbor == tile.Coord || !hex.InBounds(neighbor) {
+				continue
+			}
+			neighborTile, ok := w.Tile(neighbor)
+			if ok && neighborTile.Terrain == terrain.Forest {
+				t.Fatalf("strategic resource %v at %v is adjacent to forest at %v", tile.Terrain, tile.Coord, neighbor)
+			}
+		}
+	}
+}
+
+func TestNewWorld_TownCentersConnectedByPlainPath(t *testing.T) {
+	w := NewWorld(42)
+	start := mustTownCenterPos(t, w, entity.Team1)
+	end := mustTownCenterPos(t, w, entity.Team2)
+
+	for name, waypoint := range map[string]hex.Coord{
+		"top":    {Q: 10, R: 2},
+		"middle": {Q: 10, R: 10},
+		"bottom": {Q: 10, R: 18},
+	} {
+		if !plainPathExistsVia(w, start, waypoint, end) {
+			t.Fatalf("expected %s lane plain path between town centers %v and %v via %v", name, start, end, waypoint)
+		}
+	}
+}
+
+func mustTownCenterPos(t *testing.T, w *World, team entity.Team) hex.Coord {
+	t.Helper()
+
+	for _, b := range w.BuildingsByTeam(team) {
+		if b.Kind() == entity.KindTownCenter {
+			return b.Position()
+		}
+	}
+	t.Fatalf("missing town center for team %d", team)
+	return hex.Coord{}
+}
+
+func hasTerrainWithin(w *World, center hex.Coord, radius int, want terrain.Type) bool {
+	for _, c := range hex.Circle(center, radius) {
+		if tile, ok := w.Tile(c); ok && tile.Terrain == want {
+			return true
+		}
+	}
+	return false
+}
+
+func plainPathExists(w *World, start, end hex.Coord) bool {
+	queue := []hex.Coord{start}
+	seen := map[hex.Coord]bool{start: true}
+
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		if cur == end {
+			return true
+		}
+
+		for _, next := range cur.Neighbors() {
+			if !hex.InBounds(next) || seen[next] {
+				continue
+			}
+			tile, ok := w.Tile(next)
+			if !ok || tile.Terrain != terrain.Plain {
+				continue
+			}
+			seen[next] = true
+			queue = append(queue, next)
+		}
+	}
+	return false
+}
+
+func plainPathExistsVia(w *World, start, via, end hex.Coord) bool {
+	return plainPathExists(w, start, via) && plainPathExists(w, via, end)
+}
+
+func TestNewWorld_RulesHoldAcrossSeeds(t *testing.T) {
+	for seed := int64(1); seed <= 50; seed++ {
+		t.Run(fmt.Sprintf("seed_%d", seed), func(t *testing.T) {
+			w := NewWorld(seed)
+
+			for _, team := range []entity.Team{entity.Team1, entity.Team2} {
+				tc := mustTownCenterPos(t, w, team)
+				for _, kind := range []terrain.Type{terrain.GoldMine, terrain.StoneMine, terrain.Orchard, terrain.Deer} {
+					if !hasTerrainWithin(w, tc, 5, kind) {
+						t.Fatalf("seed %d team %d town center at %v missing %s within 5 tiles", seed, team, tc, kind.String())
+					}
+				}
+			}
+
+			for _, tile := range w.AllTiles() {
+				if !isStrategicResource(tile.Terrain) {
+					continue
+				}
+				for _, neighbor := range hex.Circle(tile.Coord, 1) {
+					if neighbor == tile.Coord || !hex.InBounds(neighbor) {
+						continue
+					}
+					neighborTile, ok := w.Tile(neighbor)
+					if ok && neighborTile.Terrain == terrain.Forest {
+						t.Fatalf("seed %d strategic resource %v at %v is adjacent to forest at %v", seed, tile.Terrain, tile.Coord, neighbor)
+					}
+				}
+			}
+
+			start := mustTownCenterPos(t, w, entity.Team1)
+			end := mustTownCenterPos(t, w, entity.Team2)
+			for name, waypoint := range map[string]hex.Coord{
+				"top":    {Q: 10, R: 2},
+				"middle": {Q: 10, R: 10},
+				"bottom": {Q: 10, R: 18},
+			} {
+				if !plainPathExistsVia(w, start, waypoint, end) {
+					t.Fatalf("seed %d missing %s lane path between town centers", seed, name)
+				}
+			}
+		})
 	}
 }

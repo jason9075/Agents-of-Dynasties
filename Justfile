@@ -18,7 +18,7 @@ dev:
     set -euo pipefail
     find . \( -name '*.go' -o -path './web/*' \) \
         -not -path './.git/*' \
-        | entr -r go run ./cmd/server
+        | entr -r go run ./cmd/server --tick 1s
 
 # Run all tests
 test:
