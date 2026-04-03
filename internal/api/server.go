@@ -19,6 +19,7 @@ func NewServer(w *world.World, q *ticker.Queue, webDir string) *Server {
 
 	mux.Handle("/map", &mapHandler{w: w})
 	mux.Handle("/state", &stateHandler{w: w})
+	mux.Handle("/state/full", &fullStateHandler{w: w})
 	mux.Handle("/command", &commandHandler{w: w, q: q})
 
 	// Serve static frontend files. Registered last so API routes take priority.

@@ -40,12 +40,12 @@ func TestInBounds(t *testing.T) {
 		want bool
 	}{
 		{Coord{0, 0}, true},
-		{Coord{29, 29}, true},
-		{Coord{15, 15}, true},
+		{Coord{19, 19}, true},
+		{Coord{10, 10}, true},
 		{Coord{-1, 0}, false},
 		{Coord{0, -1}, false},
-		{Coord{30, 0}, false},
-		{Coord{0, 30}, false},
+		{Coord{20, 0}, false},
+		{Coord{0, 20}, false},
 	}
 	for _, c := range cases {
 		if got := InBounds(c.c); got != c.want {
@@ -55,7 +55,7 @@ func TestInBounds(t *testing.T) {
 }
 
 func TestRing(t *testing.T) {
-	center := Coord{15, 15}
+	center := Coord{10, 10}
 	for r := 1; r <= 5; r++ {
 		ring := Ring(center, r)
 		// All tiles in the ring must be exactly r away.
@@ -68,7 +68,7 @@ func TestRing(t *testing.T) {
 }
 
 func TestCircle(t *testing.T) {
-	center := Coord{15, 15}
+	center := Coord{10, 10}
 	circle := Circle(center, 3)
 	for _, c := range circle {
 		if Distance(center, c) > 3 {

@@ -10,7 +10,7 @@ import (
 func TestNewWorld_TileCount(t *testing.T) {
 	w := NewWorld(42)
 	tiles := w.AllTiles()
-	want := hex.GridSize * hex.GridSize
+	want := hex.GridSize * hex.GridSize // 20×20 = 400
 	if len(tiles) != want {
 		t.Fatalf("expected %d tiles, got %d", want, len(tiles))
 	}

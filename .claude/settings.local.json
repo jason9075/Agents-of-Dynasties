@@ -3,7 +3,9 @@
     "allow": [
       "Bash(go build:*)",
       "Bash(go test:*)",
-      "Bash(find /Users/astra-jason-kuan/projects/agents_of_empires -type f ! -path '*/\\\\.git/*' ! -path '*/.claude/*' -exec basename {} \\\\;)"
+      "Bash(find /Users/astra-jason-kuan/projects/agents_of_empires -type f ! -path '*/\\\\.git/*' ! -path '*/.claude/*' -exec basename {} \\\\;)",
+      "Bash(node --input-type=module)",
+      "Bash(python3 -c ':*)"
     ]
   }
 }

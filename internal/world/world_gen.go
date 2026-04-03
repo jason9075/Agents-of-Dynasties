@@ -50,7 +50,7 @@ func generate(w *World, seed int64) {
 
 	// Starting positions: clear a small area around each Town Center.
 	tc1Pos := hex.Coord{Q: 4, R: 4}
-	tc2Pos := hex.Coord{Q: 25, R: 25}
+	tc2Pos := hex.Coord{Q: 16, R: 16}
 	clearArea(w, tc1Pos, 2)
 	clearArea(w, tc2Pos, 2)
 
@@ -65,9 +65,9 @@ func generate(w *World, seed int64) {
 	// Spawn Team 2 starting entities.
 	tc2 := entity.NewBuilding(w.nextID(), entity.Team2, entity.KindTownCenter, tc2Pos)
 	w.addBuilding(tc2)
-	v3 := entity.NewUnit(w.nextID(), entity.Team2, entity.KindVillager, hex.Coord{Q: 24, R: 25})
+	v3 := entity.NewUnit(w.nextID(), entity.Team2, entity.KindVillager, hex.Coord{Q: 15, R: 16})
 	w.addUnit(v3)
-	v4 := entity.NewUnit(w.nextID(), entity.Team2, entity.KindVillager, hex.Coord{Q: 25, R: 24})
+	v4 := entity.NewUnit(w.nextID(), entity.Team2, entity.KindVillager, hex.Coord{Q: 16, R: 15})
 	w.addUnit(v4)
 }
 

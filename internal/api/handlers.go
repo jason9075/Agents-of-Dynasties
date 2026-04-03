@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/jason9075/agents_of_empires/internal/entity"
+	"github.com/jason9075/agents_of_empires/internal/hex"
 	"github.com/jason9075/agents_of_empires/internal/terrain"
 	"github.com/jason9075/agents_of_empires/internal/ticker"
 	"github.com/jason9075/agents_of_empires/internal/world"
@@ -66,8 +67,8 @@ func (h *mapHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	h.once.Do(func() {
 		resp := mapResponse{
-			Width:  30,
-			Height: 30,
+			Width:  hex.GridSize,
+			Height: hex.GridSize,
 			Tiles:  h.w.AllTiles(),
 		}
 		h.data, _ = json.Marshal(resp)
@@ -152,6 +153,74 @@ func (h *stateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Resources: h.w.GetResources(team),
 		Units:     units,
 		Buildings: buildings,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+// --- Full state handler (god-mode, no LOS masking) ---
+
+type fullStateTeam struct {
+	Resources world.Resources `json:"resources"`
+	Units     []unitView      `json:"units"`
+	Buildings []buildingView  `json:"buildings"`
+}
+
+type fullStateResponse struct {
+	Tick  uint64        `json:"tick"`
+	Team1 fullStateTeam `json:"team1"`
+	Team2 fullStateTeam `json:"team2"`
+}
+
+type fullStateHandler struct {
+	w *world.World
+}
+
+func (h *fullStateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	teamData := func(team entity.Team) fullStateTeam {
+		var units []unitView
+		for _, u := range h.w.UnitsByTeam(team) {
+			pos := u.Position()
+			units = append(units, unitView{
+				ID:       u.ID(),
+				Kind:     u.Kind().String(),
+				Team:     u.Team(),
+				Position: coordView{Q: pos.Q, R: pos.R},
+				HP:       u.HP(),
+				MaxHP:    u.MaxHP(),
+				Friendly: true,
+			})
+		}
+		var buildings []buildingView
+		for _, b := range h.w.BuildingsByTeam(team) {
+			pos := b.Position()
+			buildings = append(buildings, buildingView{
+				ID:       b.ID(),
+				Kind:     b.Kind().String(),
+				Team:     b.Team(),
+				Position: coordView{Q: pos.Q, R: pos.R},
+				HP:       b.HP(),
+				MaxHP:    b.MaxHP(),
+				Friendly: true,
+			})
+		}
+		return fullStateTeam{
+			Resources: h.w.GetResources(team),
+			Units:     units,
+			Buildings: buildings,
+		}
+	}
+
+	resp := fullStateResponse{
+		Tick:  h.w.GetTick(),
+		Team1: teamData(entity.Team1),
+		Team2: teamData(entity.Team2),
 	}
 
 	w.Header().Set("Content-Type", "application/json")
