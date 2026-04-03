@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"flag"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -16,7 +18,10 @@ import (
 )
 
 func main() {
-	addr := flag.String("addr", ":8080", "HTTP listen address")
+	loadDotEnv(".env")
+
+	defaultAddr := defaultListenAddr()
+	addr := flag.String("addr", defaultAddr, "HTTP listen address")
 	seed := flag.Int64("seed", 42, "World generation seed")
 	tickInterval := flag.Duration("tick", ticker.DefaultInterval, "Game tick interval")
 	webDir := flag.String("web-dir", "./web", "Directory of static frontend files")
@@ -58,4 +63,48 @@ func main() {
 		slog.Error("shutdown error", "err", err)
 	}
 	slog.Info("stopped")
+}
+
+func defaultListenAddr() string {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("ENV"))) {
+	case "prod", "production":
+		return ":8080"
+	default:
+		return "127.0.0.1:8080"
+	}
+}
+
+func loadDotEnv(path string) {
+	file, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+
+		value = strings.TrimSpace(value)
+		value = strings.Trim(value, `"'`)
+
+		// Respect variables already set by the shell or process manager.
+		if _, exists := os.LookupEnv(key); exists {
+			continue
+		}
+		_ = os.Setenv(key, value)
+	}
 }
