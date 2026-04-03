@@ -1,0 +1,78 @@
+package hex
+
+import "testing"
+
+func TestDistance(t *testing.T) {
+	cases := []struct {
+		a, b Coord
+		want int
+	}{
+		{Coord{0, 0}, Coord{0, 0}, 0},
+		{Coord{0, 0}, Coord{1, 0}, 1},
+		{Coord{0, 0}, Coord{3, 0}, 3},
+		{Coord{0, 0}, Coord{0, 3}, 3},
+		{Coord{5, 5}, Coord{5, 5}, 0},
+		{Coord{0, 0}, Coord{2, -2}, 2},
+	}
+	for _, c := range cases {
+		if got := Distance(c.a, c.b); got != c.want {
+			t.Errorf("Distance(%v, %v) = %d, want %d", c.a, c.b, got, c.want)
+		}
+	}
+}
+
+func TestNeighbors(t *testing.T) {
+	c := Coord{5, 5}
+	neighbors := c.Neighbors()
+	if len(neighbors) != 6 {
+		t.Fatalf("expected 6 neighbors, got %d", len(neighbors))
+	}
+	for _, n := range neighbors {
+		if Distance(c, n) != 1 {
+			t.Errorf("neighbor %v is not distance 1 from %v", n, c)
+		}
+	}
+}
+
+func TestInBounds(t *testing.T) {
+	cases := []struct {
+		c    Coord
+		want bool
+	}{
+		{Coord{0, 0}, true},
+		{Coord{29, 29}, true},
+		{Coord{15, 15}, true},
+		{Coord{-1, 0}, false},
+		{Coord{0, -1}, false},
+		{Coord{30, 0}, false},
+		{Coord{0, 30}, false},
+	}
+	for _, c := range cases {
+		if got := InBounds(c.c); got != c.want {
+			t.Errorf("InBounds(%v) = %v, want %v", c.c, got, c.want)
+		}
+	}
+}
+
+func TestRing(t *testing.T) {
+	center := Coord{15, 15}
+	for r := 1; r <= 5; r++ {
+		ring := Ring(center, r)
+		// All tiles in the ring must be exactly r away.
+		for _, c := range ring {
+			if d := Distance(center, c); d != r {
+				t.Errorf("Ring(%v, %d) contains %v at distance %d", center, r, c, d)
+			}
+		}
+	}
+}
+
+func TestCircle(t *testing.T) {
+	center := Coord{15, 15}
+	circle := Circle(center, 3)
+	for _, c := range circle {
+		if Distance(center, c) > 3 {
+			t.Errorf("Circle(%v, 3) contains %v at distance %d", center, c, Distance(center, c))
+		}
+	}
+}
