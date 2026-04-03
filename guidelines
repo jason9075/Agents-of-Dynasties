@@ -1,0 +1,111 @@
+This project, **Agents of Empires**, is a unique intersection of classic RTS mechanics and modern LLM-based agentic workflows. Since you are building this with **Golang** on **NixOS**, these guidelines focus on high-performance concurrency and a clean API surface for AI agents to consume.
+
+---
+
+# Project Guideline: Agents of Empires (AoE-AI)
+
+## 1. Project Overview
+**Agents of Empires** is a headless-first Real-Time Strategy (RTS) game where human players act as high-level strategists, delegating tactical execution to AI Agents (e.g., Claude Code, Codex). The game runs on a 10-second tick cycle, emphasizing strategic planning over "APM" (Actions Per Minute).
+
+---
+
+## 2. Technical Stack & Environment
+* **Backend:** Golang (Standard library + `Gorilla WebSocket` or `Gin` for REST).
+* **Infrastructure:** NixOS (Reproducible builds via `flake.nix`).
+* **Development:** Neovim (LSP: `gopls`, `templ` for frontend components if needed).
+* **Frontend:** Simple React/Vue or Vanilla JS dashboard for real-time visualization of the game state via WebSockets.
+
+---
+
+## 3. Core Game Mechanics
+
+### Map & Terrain
+The world is a **30x30 Hexagonal Grid**. We recommend using **Axial Coordinates** $(q, r)$ for hex math.
+* **Terrains:** Plain, Forest, Mountain, Lake, Gold Mine, Stone Mine, Orchard, Deer.
+* **Fog of War:** * **Static:** Terrain layout is known to all agents at $T=0$.
+    * **Dynamic:** Enemy units and buildings are only visible if within the **Line of Sight (LOS)** of a friendly unit.
+
+### Entities & Economy
+| Category | Type | Limit | Role |
+| :--- | :--- | :--- | :--- |
+| **Civic** | Town Center | 1 | Production of Villagers; Drop-off point. |
+| **Civic** | Villager | - | Resource gathering & Building construction. |
+| **Military** | Barracks | 1 | Produces Infantry, Spearman. |
+| **Military** | Stable | 1 | Produces Scout Cavalry, Paladin. |
+| **Military** | Archery Range | 1 | Produces Archers. |
+
+* **Population Cap:** Hard limit of **20 units** per team.
+* **Resources:** Food (Orchards/Deer), Gold (Gold Mine), Stone (Stone Mine), Wood (Forest).
+
+---
+
+## 4. The Agent Skill Framework
+Unlike traditional games, the "Player" is an API client. The **Agent Skill Set** is a JSON-RPC or REST interface that the AI Agent uses to perceive and act.
+
+### Perception API
+* `GET /map`: Returns the static terrain grid.
+* `GET /state`: Returns current resources, unit positions, and **visible** enemy units (masked by LOS).
+
+### Action API (The "Last-Command-Wins" Rule)
+The server processes turns every 10 seconds. If an agent sends multiple commands for the same unit within a window, only the latest replaces the previous one.
+* `MOVE_FAST`: Higher speed, zero defense.
+* `MOVE_GUARD`: Normal speed, engages enemies automatically.
+* `ATTACK`: Target a specific unit/building.
+* `GATHER`: Target a resource node.
+* `BUILD`: Construct a building at a hex.
+* `PRODUCE`: Queue a unit in a building.
+
+---
+
+## 5. Implementation Roadmap (Golang Backend)
+
+### Phase 1: The Hex Engine
+* Implement the hexagonal coordinate system.
+* Create a `World` struct to manage the 30x30 grid and entity registry.
+* Implement a `Ticker` (10s) that processes the command queue.
+
+### Phase 2: Fog of War & LOS
+* Calculate visibility circles for each unit.
+* Implement a "View Filtering" layer: When Team A requests `/state`, the server iterates through all entities and hides those not within Team A's LOS.
+
+### Phase 3: Resource & Combat Logic
+* **Gathering:** Villagers increment resource counters per tick when adjacent to nodes.
+* **Combat:** Simple Rock-Paper-Scissors math (e.g., Spearman > Cavalry > Archers > Spearman).
+
+### Phase 4: Agent Integration Layer
+* Define the `AgentSkills` documentation (a prompt-friendly schema).
+* Create an "Instruction Channel": A way for the human user to inject high-level strings (e.g., `"Priority: Economy, avoid combat"`) which the Agent reads before deciding on API calls.
+
+---
+
+## 6. NixOS Development Setup
+Since you are on NixOS, use a `shell.nix` or `flake.nix` to ensure your agent and server environments are identical.
+
+```nix
+{
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  outputs = { self, nixpkgs }: {
+    devShells.x86_64-linux.default = let
+      pkgs = nixpkgs.legacyPackages.x86_64-linux;
+    in pkgs.mkShell {
+      buildInputs = with pkgs; [
+        go
+        gopls
+        golangci-lint
+        delve # For Neovim debugging
+      ];
+    };
+  };
+}
+```
+
+---
+
+## 7. Strategic Human Interference
+The browser dashboard should allow the user to:
+1.  **Monitor:** View the "God Mode" map (optional) or "Player View".
+2.  **Directive Injection:** Send a text prompt to the Agent's context window to pivot strategy.
+3.  **Override:** A "Panic Button" to manually issue a move command that the Agent cannot overwrite for the current turn.
+
+
+
