@@ -1,0 +1,21 @@
+# Go
+/bin/
+*.exe
+*.test
+*.out
+vendor/
+
+# Nix
+.direnv/
+result
+result-*
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Env
+.env
+.env.*
