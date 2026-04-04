@@ -35,6 +35,7 @@ The following are implemented today:
 - Villager gathering
 - Villager building construction
 - Building-based unit production
+- Persistent per-unit action status across ticks
 
 The following are not fully implemented yet:
 
@@ -42,6 +43,8 @@ The following are not fully implemented yet:
 - Advanced pathfinding
 
 Important: the current implementation already applies movement, combat, gathering, building, and production in the ticker. Some systems are still simplified. Villagers now carry resources and must deposit them beside a friendly `town_center`, but there is still no richer worker automation or advanced pathfinding.
+
+Units now also keep a persistent status such as `IDLE`, `MOVING_FAST`, `MOVING_GUARD`, `ATTACKING`, `GATHERING`, or `BUILDING`. A unit stays in that status until the task completes, is overwritten by a new command, or receives `STOP`.
 
 ## Unit Roster
 

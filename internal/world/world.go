@@ -220,24 +220,6 @@ func (w *World) GetUnit(id entity.EntityID) *entity.Unit {
 	return w.Units[id]
 }
 
-// SetUnitAttackTarget marks a unit as actively targeting another entity.
-func (w *World) SetUnitAttackTarget(unitID, targetID entity.EntityID) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if u := w.Units[unitID]; u != nil && u.IsAlive() {
-		u.SetAttackTarget(targetID)
-	}
-}
-
-// ClearUnitAttackTarget clears a unit's active attack target marker.
-func (w *World) ClearUnitAttackTarget(unitID entity.EntityID) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if u := w.Units[unitID]; u != nil {
-		u.ClearAttackTarget()
-	}
-}
-
 // GetBuilding returns the building with the given ID, or nil.
 func (w *World) GetBuilding(id entity.EntityID) *entity.Building {
 	w.mu.RLock()

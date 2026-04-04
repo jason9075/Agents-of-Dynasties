@@ -10,6 +10,7 @@ No other documentation is needed to make correct API calls.
 - The game world is a **20×15 hexagonal grid** using **axial coordinates** `(q, r)`, where `0 ≤ q < 20` and `0 ≤ r < 15`.
 - Game time advances in ticks. The server default is **10 seconds per tick**, but startup flags may override it.
 - **Last-command-wins:** If you submit two commands for the same unit before the tick fires, only the most recent is executed. Previous commands for that unit are silently discarded.
+- Unit commands are persistent. After the next tick boundary applies them, the unit keeps executing that status until it completes, is overwritten, or receives `STOP`.
 - Authenticate every request by setting the `X-Team-ID` header to `1` or `2`.
 - Base URL: `http://localhost:8080` (configurable via `--addr` flag on server start).
 
@@ -109,6 +110,9 @@ Returns current game state filtered by your team's **Line of Sight (LOS)**.
       "position": { "q": 5, "r": 4 },
       "hp": 25,
       "max_hp": 25,
+      "status": "GATHERING",
+      "status_phase": "RETURNING",
+      "status_target_coord": { "q": 5, "r": 5 },
       "carry_resource": "food",
       "carry_amount": 18,
       "friendly": true
@@ -120,6 +124,9 @@ Returns current game state filtered by your team's **Line of Sight (LOS)**.
       "position": { "q": 8, "r": 8 },
       "hp": 30,
       "max_hp": 30,
+      "status": "ATTACKING",
+      "status_phase": "ATTACKING",
+      "status_target_id": 2,
       "attack_target_id": 2,
       "friendly": false
     }
@@ -147,6 +154,9 @@ Returns current game state filtered by your team's **Line of Sight (LOS)**.
 - `tick` — current game tick number (starts at 0 and increments once per server tick interval).
 - `resources` — your team's current stockpile only. Enemy resources are never exposed.
 - `population` — current living population, reserved queue population, and the hard team cap.
+- `status` — the unit's persistent action state, such as `IDLE`, `MOVING_FAST`, `MOVING_GUARD`, `ATTACKING`, `GATHERING`, or `BUILDING`.
+- `status_phase` — the unit's current sub-phase inside that state.
+- `status_target_coord` / `status_target_id` / `status_building_kind` — the target the unit is currently committed to.
 - `units` / `buildings` — mix of friendly (`"friendly": true`) and visible enemy (`"friendly": false`) entities.
 - Enemy entities only appear if they are within the LOS radius of at least one of your units or buildings.
 
@@ -186,12 +196,13 @@ This endpoint exists so an agent can avoid re-issuing duplicate or contradictory
 - `commands` — only your team's pending commands.
 - pending commands already follow last-command-wins semantics, so each actor appears at most once.
 - this is not command history; once the next tick resolves, the queue is cleared.
+- use `/commands` to inspect submissions still waiting for the next tick, and `/state` to inspect what units are still doing across later ticks.
 
 ---
 
 ### `POST /command`
 
-Submits an action for one of your units. Returns `202 Accepted` immediately; the command is processed at the next tick.
+Submits an action for one of your units. Returns `202 Accepted` immediately; the command is queued for the next tick and then updates the unit's persistent status.
 
 **Required header:** `X-Team-ID: 1` or `X-Team-ID: 2`
 
@@ -208,12 +219,13 @@ Submits an action for one of your units. Returns `202 Accepted` immediately; the
 
 | Kind          | Required fields                          | Effect                                                    |
 |---------------|------------------------------------------|-----------------------------------------------------------|
-| `MOVE_FAST`   | `target_coord`                           | Move toward target at full speed; no auto-engage          |
-| `MOVE_GUARD`  | `target_coord`                           | Move toward target at normal speed; auto-attacks enemies in LOS |
-| `ATTACK`      | `target_id`                              | Attack a specific unit or building by ID                  |
-| `GATHER`      | `unit_id`                                | Villager gathers from its current tile, or deposits if already carrying beside a friendly `town_center` |
-| `BUILD`       | `target_coord`, `building_kind`          | Villager constructs a building at target_coord            |
+| `MOVE_FAST`   | `target_coord`                           | Persistently move toward target at full speed until arrival, overwrite, or `STOP` |
+| `MOVE_GUARD`  | `target_coord`                           | Persistently move toward target at guarded speed and switch into combat if an enemy enters range |
+| `ATTACK`      | `target_id`                              | Persistently pursue and attack a specific unit or building until completion, overwrite, or `STOP` |
+| `GATHER`      | `target_coord`                           | Villager persistently gathers from that node, returns to a friendly `town_center`, deposits, and repeats |
+| `BUILD`       | `target_coord`, `building_kind`          | Villager persistently moves to the target and keeps building until completion |
 | `PRODUCE`     | `building_id`, `unit_kind`               | Queue a unit in the specified building                    |
+| `STOP`        | `unit_id`                                | Clear the unit's current persistent status and return it to `IDLE` |
 
 **`building_kind` values:** `"barracks"`, `"stable"`, `"archery_range"`
 
@@ -319,13 +331,13 @@ A minimal loop for an agent to start gathering resources:
 
 2. GET /state  (X-Team-ID: 1)
    → Read `tick`, `resources`, `population`, and your unit/building list.
-   → Identify villager unit IDs.
+   → Identify villager unit IDs and current `status`.
 
 3. GET /commands  (X-Team-ID: 1)
    → Check which actors already have pending commands in the current tick window.
 
 4. POST /command  (X-Team-ID: 1)
-   Body: { "unit_id": 2, "kind": "GATHER" }
+   Body: { "unit_id": 2, "kind": "GATHER", "target_coord": { "q": 6, "r": 4 } }
    → 202 Accepted
 
 5. GET /commands  (X-Team-ID: 1)
@@ -334,7 +346,7 @@ A minimal loop for an agent to start gathering resources:
 6. Wait for one tick.
 
 7. GET /state  (X-Team-ID: 1)
-   → Verify the villager's `carry_amount` changed, or your stockpile increased if it deposited.
+   → Verify the villager's `status`, `status_phase`, `carry_amount`, or stockpile changed as expected.
 
 8. Repeat from step 2, adjusting strategy based on current state.
 ```

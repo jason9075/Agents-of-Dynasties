@@ -31,9 +31,10 @@ func TestStep_AppliesGatherBuildAndProduce(t *testing.T) {
 	})
 
 	q.Submit(Command{
-		Team:   entity.Team1,
-		UnitID: gatherer.ID(),
-		Kind:   CmdGather,
+		Team:        entity.Team1,
+		UnitID:      gatherer.ID(),
+		Kind:        CmdGather,
+		TargetCoord: &resourcePos,
 	})
 	tk.step()
 
@@ -41,15 +42,6 @@ func TestStep_AppliesGatherBuildAndProduce(t *testing.T) {
 	if afterGather.Food != startRes.Food {
 		t.Fatalf("expected carry-only gather before deposit, got %+v from %+v", afterGather, startRes)
 	}
-	tc := hex.Coord{Q: 4, R: 4}
-	w.WriteFunc(func() {
-		gatherer.SetPosition(hex.Coord{Q: tc.Q + 1, R: tc.R})
-	})
-	q.Submit(Command{
-		Team:   entity.Team1,
-		UnitID: gatherer.ID(),
-		Kind:   CmdGather,
-	})
 	tk.step()
 	afterDeposit := w.GetResources(entity.Team1)
 	if afterDeposit.Food != startRes.Food+18 {
@@ -166,6 +158,36 @@ func TestStep_AttackPersistsAcrossTicks(t *testing.T) {
 	}
 }
 
+func TestStep_AttackPersistsAndClosesDistance(t *testing.T) {
+	w := world.NewWorld(42)
+	q := NewQueue()
+	tk := New(w, q, time.Second)
+
+	attacker := w.SpawnUnit(entity.Team1, entity.KindInfantry, hex.Coord{Q: 2, R: 2})
+	target := w.SpawnUnit(entity.Team2, entity.KindArcher, hex.Coord{Q: 7, R: 2})
+
+	q.Submit(Command{Team: entity.Team1, UnitID: attacker.ID(), Kind: CmdAttack, TargetID: ptrID(target.ID())})
+	startDist := hex.Distance(attacker.Position(), target.Position())
+	tk.step()
+	afterFirst := w.GetUnit(attacker.ID())
+	if afterFirst == nil || afterFirst.Status() != entity.StatusAttacking {
+		t.Fatalf("expected attacker to stay in attacking status while chasing")
+	}
+	if got := hex.Distance(afterFirst.Position(), target.Position()); got >= startDist {
+		t.Fatalf("expected attacker to close distance, start=%d got=%d", startDist, got)
+	}
+
+	for i := 0; i < 4; i++ {
+		tk.step()
+		if w.GetUnit(target.ID()) == nil {
+			break
+		}
+	}
+	if w.GetUnit(target.ID()) != nil && w.GetUnit(target.ID()).HP() == w.GetUnit(target.ID()).MaxHP() {
+		t.Fatalf("expected target to eventually take damage")
+	}
+}
+
 func TestStep_AttackTargetClearsAfterTargetDies(t *testing.T) {
 	w := world.NewWorld(42)
 	q := NewQueue()
@@ -179,12 +201,8 @@ func TestStep_AttackTargetClearsAfterTargetDies(t *testing.T) {
 
 	q.Submit(Command{Team: entity.Team1, UnitID: attacker.ID(), Kind: CmdAttack, TargetID: ptrID(target.ID())})
 	tk.step()
-	if _, ok := w.GetUnit(attacker.ID()).AttackTargetID(); !ok {
-		t.Fatalf("expected attacker to still show target during kill tick")
-	}
-	tk.step()
 	if _, ok := w.GetUnit(attacker.ID()).AttackTargetID(); ok {
-		t.Fatalf("expected attack target to clear after target is gone")
+		t.Fatalf("expected attack target to clear once target is dead")
 	}
 }
 
@@ -206,6 +224,186 @@ func TestStep_SimultaneousCombatAllowsMutualKill(t *testing.T) {
 
 	if w.GetUnit(u1.ID()) != nil || w.GetUnit(u2.ID()) != nil {
 		t.Fatalf("expected mutual kill, got u1=%v u2=%v", w.GetUnit(u1.ID()), w.GetUnit(u2.ID()))
+	}
+}
+
+func TestStep_MoveFastPersistsAcrossTicksUntilArrival(t *testing.T) {
+	w := world.NewWorld(42)
+	q := NewQueue()
+	tk := New(w, q, time.Second)
+
+	unit := w.SpawnUnit(entity.Team1, entity.KindInfantry, hex.Coord{Q: 2, R: 2})
+	target := hex.Coord{Q: 7, R: 2}
+
+	q.Submit(Command{Team: entity.Team1, UnitID: unit.ID(), Kind: CmdMoveFast, TargetCoord: &target})
+	tk.step()
+	firstPos := w.GetUnit(unit.ID()).Position()
+	if firstPos == (hex.Coord{Q: 2, R: 2}) {
+		t.Fatalf("expected unit to start moving on first tick")
+	}
+	if w.GetUnit(unit.ID()).Status() != entity.StatusMovingFast {
+		t.Fatalf("expected status to persist after first tick")
+	}
+
+	tk.step()
+	secondPos := w.GetUnit(unit.ID()).Position()
+	if hex.Distance(secondPos, target) >= hex.Distance(firstPos, target) {
+		t.Fatalf("expected unit to keep moving toward target, first=%v second=%v target=%v", firstPos, secondPos, target)
+	}
+
+	for i := 0; i < 4; i++ {
+		tk.step()
+	}
+	if got := w.GetUnit(unit.ID()).Position(); got != target {
+		t.Fatalf("expected unit to arrive at target, got %v want %v", got, target)
+	}
+	if w.GetUnit(unit.ID()).Status() != entity.StatusIdle {
+		t.Fatalf("expected unit to become idle after arrival")
+	}
+}
+
+func TestStep_GatherAutoShuttlesUntilDeposit(t *testing.T) {
+	w := world.NewWorld(42)
+	q := NewQueue()
+	tk := New(w, q, time.Second)
+
+	villager := w.UnitsByTeam(entity.Team1)[0]
+	resourcePos := hex.Coord{Q: 5, R: 5}
+	startRes := w.GetResources(entity.Team1)
+
+	w.WriteFunc(func() {
+		villager.SetPosition(resourcePos)
+		w.Tiles[resourcePos] = terrain.Tile{Coord: resourcePos, Terrain: terrain.Orchard}
+		w.ResourceRemaining[resourcePos] = 36
+	})
+
+	q.Submit(Command{Team: entity.Team1, UnitID: villager.ID(), Kind: CmdGather, TargetCoord: &resourcePos})
+	tk.step()
+	if villager.CarryAmount() != 18 {
+		t.Fatalf("expected villager to carry after gather, got %d", villager.CarryAmount())
+	}
+	tk.step()
+	after := w.GetResources(entity.Team1)
+	if after.Food != startRes.Food+18 {
+		t.Fatalf("expected auto deposit after second tick, got %+v want food=%d", after, startRes.Food+18)
+	}
+	if villager.Status() != entity.StatusGathering {
+		t.Fatalf("expected gather status to persist while node remains")
+	}
+}
+
+func TestStep_BuildPersistsUntilConstructionCompletes(t *testing.T) {
+	w := world.NewWorld(42)
+	q := NewQueue()
+	tk := New(w, q, time.Second)
+
+	builder := w.UnitsByTeam(entity.Team1)[0]
+	target := hex.Coord{Q: 6, R: 5}
+	buildingKind := "barracks"
+
+	w.WriteFunc(func() {
+		builder.SetPosition(hex.Coord{Q: 5, R: 5})
+		w.Tiles[target] = terrain.Tile{Coord: target, Terrain: terrain.Plain}
+	})
+
+	q.Submit(Command{
+		Team:         entity.Team1,
+		UnitID:       builder.ID(),
+		Kind:         CmdBuild,
+		TargetCoord:  &target,
+		BuildingKind: &buildingKind,
+	})
+	tk.step()
+	if builder.Status() != entity.StatusBuilding {
+		t.Fatalf("expected builder to stay in building status after site creation")
+	}
+	tk.step()
+	if builder.Status() != entity.StatusIdle {
+		t.Fatalf("expected builder to become idle after completion")
+	}
+}
+
+func TestStep_BuildAutoMovesThenConstructs(t *testing.T) {
+	w := world.NewWorld(42)
+	q := NewQueue()
+	tk := New(w, q, time.Second)
+
+	builder := w.UnitsByTeam(entity.Team1)[0]
+	teamUnits := w.UnitsByTeam(entity.Team1)
+	target := hex.Coord{Q: 6, R: 5}
+	buildingKind := "barracks"
+
+	w.WriteFunc(func() {
+		builder.SetPosition(hex.Coord{Q: 2, R: 5})
+		offset := 0
+		for _, u := range teamUnits {
+			if u.ID() == builder.ID() {
+				continue
+			}
+			u.SetPosition(hex.Coord{Q: offset, R: 14})
+			offset++
+		}
+		for q := 2; q <= 6; q++ {
+			c := hex.Coord{Q: q, R: 5}
+			w.Tiles[c] = terrain.Tile{Coord: c, Terrain: terrain.Plain}
+		}
+		w.Tiles[target] = terrain.Tile{Coord: target, Terrain: terrain.Plain}
+		for _, c := range hex.Circle(target, 1) {
+			if hex.InBounds(c) {
+				w.Tiles[c] = terrain.Tile{Coord: c, Terrain: terrain.Plain}
+			}
+		}
+	})
+
+	q.Submit(Command{
+		Team:         entity.Team1,
+		UnitID:       builder.ID(),
+		Kind:         CmdBuild,
+		TargetCoord:  &target,
+		BuildingKind: &buildingKind,
+	})
+
+	tk.step()
+	if builder.Status() != entity.StatusBuilding {
+		t.Fatalf("expected builder to keep building status while moving")
+	}
+	if hex.Distance(builder.Position(), target) <= 1 {
+		t.Fatalf("expected builder to still be approaching after first tick")
+	}
+
+	for i := 0; i < 4; i++ {
+		tk.step()
+	}
+
+	var found bool
+	for _, b := range w.BuildingsByTeam(entity.Team1) {
+		if b.Kind() == entity.KindBarracks && b.Position() == target {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected builder to eventually create barracks at %v, builder_pos=%v status=%s phase=%s", target, builder.Position(), builder.Status(), builder.StatusPhase())
+	}
+}
+
+func TestStep_StopClearsPersistentUnitStatus(t *testing.T) {
+	w := world.NewWorld(42)
+	q := NewQueue()
+	tk := New(w, q, time.Second)
+
+	unit := w.SpawnUnit(entity.Team1, entity.KindInfantry, hex.Coord{Q: 2, R: 2})
+	target := hex.Coord{Q: 7, R: 2}
+
+	q.Submit(Command{Team: entity.Team1, UnitID: unit.ID(), Kind: CmdMoveFast, TargetCoord: &target})
+	tk.step()
+	if w.GetUnit(unit.ID()).Status() != entity.StatusMovingFast {
+		t.Fatalf("expected unit to be moving before stop")
+	}
+
+	q.Submit(Command{Team: entity.Team1, UnitID: unit.ID(), Kind: CmdStop})
+	tk.step()
+	if w.GetUnit(unit.ID()).Status() != entity.StatusIdle {
+		t.Fatalf("expected stop to clear unit status")
 	}
 }
 

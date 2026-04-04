@@ -21,3 +21,5 @@ result-*
 
 # Assets (temporary; add to version control when finalized)
 web/assets/**/*.png
+
+tmp/

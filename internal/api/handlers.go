@@ -26,16 +26,21 @@ type tileView struct {
 }
 
 type unitView struct {
-	ID             entity.EntityID  `json:"id"`
-	Kind           string           `json:"kind"`
-	Team           entity.Team      `json:"team"`
-	Position       coordView        `json:"position"`
-	HP             int              `json:"hp"`
-	MaxHP          int              `json:"max_hp"`
-	CarryResource  string           `json:"carry_resource,omitempty"`
-	CarryAmount    int              `json:"carry_amount"`
-	AttackTargetID *entity.EntityID `json:"attack_target_id,omitempty"`
-	Friendly       bool             `json:"friendly"`
+	ID                 entity.EntityID  `json:"id"`
+	Kind               string           `json:"kind"`
+	Team               entity.Team      `json:"team"`
+	Position           coordView        `json:"position"`
+	HP                 int              `json:"hp"`
+	MaxHP              int              `json:"max_hp"`
+	CarryResource      string           `json:"carry_resource,omitempty"`
+	CarryAmount        int              `json:"carry_amount"`
+	Status             string           `json:"status"`
+	StatusPhase        string           `json:"status_phase,omitempty"`
+	StatusTargetCoord  *coordView       `json:"status_target_coord,omitempty"`
+	StatusTargetID     *entity.EntityID `json:"status_target_id,omitempty"`
+	StatusBuildingKind string           `json:"status_building_kind,omitempty"`
+	AttackTargetID     *entity.EntityID `json:"attack_target_id,omitempty"`
+	Friendly           bool             `json:"friendly"`
 }
 
 type buildingView struct {
@@ -139,42 +144,10 @@ func (h *stateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	var units []unitView
 	for _, u := range ownUnits {
-		pos := u.Position()
-		var attackTargetID *entity.EntityID
-		if id, ok := u.AttackTargetID(); ok {
-			attackTargetID = &id
-		}
-		units = append(units, unitView{
-			ID:             u.ID(),
-			Kind:           u.Kind().String(),
-			Team:           u.Team(),
-			Position:       coordView{Q: pos.Q, R: pos.R},
-			HP:             u.HP(),
-			MaxHP:          u.MaxHP(),
-			CarryResource:  string(u.CarryType()),
-			CarryAmount:    u.CarryAmount(),
-			AttackTargetID: attackTargetID,
-			Friendly:       true,
-		})
+		units = append(units, toUnitView(u, true))
 	}
 	for _, u := range enemyUnits {
-		pos := u.Position()
-		var attackTargetID *entity.EntityID
-		if id, ok := u.AttackTargetID(); ok {
-			attackTargetID = &id
-		}
-		units = append(units, unitView{
-			ID:             u.ID(),
-			Kind:           u.Kind().String(),
-			Team:           u.Team(),
-			Position:       coordView{Q: pos.Q, R: pos.R},
-			HP:             u.HP(),
-			MaxHP:          u.MaxHP(),
-			CarryResource:  string(u.CarryType()),
-			CarryAmount:    u.CarryAmount(),
-			AttackTargetID: attackTargetID,
-			Friendly:       false,
-		})
+		units = append(units, toUnitView(u, false))
 	}
 
 	var buildings []buildingView
@@ -253,23 +226,7 @@ func (h *fullStateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	teamData := func(team entity.Team) fullStateTeam {
 		var units []unitView
 		for _, u := range h.w.UnitsByTeam(team) {
-			pos := u.Position()
-			var attackTargetID *entity.EntityID
-			if id, ok := u.AttackTargetID(); ok {
-				attackTargetID = &id
-			}
-			units = append(units, unitView{
-				ID:             u.ID(),
-				Kind:           u.Kind().String(),
-				Team:           u.Team(),
-				Position:       coordView{Q: pos.Q, R: pos.R},
-				HP:             u.HP(),
-				MaxHP:          u.MaxHP(),
-				CarryResource:  string(u.CarryType()),
-				CarryAmount:    u.CarryAmount(),
-				AttackTargetID: attackTargetID,
-				Friendly:       true,
-			})
+			units = append(units, toUnitView(u, true))
 		}
 		var buildings []buildingView
 		for _, b := range h.w.BuildingsByTeam(team) {
@@ -416,6 +373,8 @@ func (h *commandHandler) validateCommand(cmd ticker.Command) (int, string, strin
 		return h.validateAttack(cmd)
 	case ticker.CmdProduce:
 		return h.validateProduce(cmd)
+	case ticker.CmdStop:
+		return 0, "", ""
 	default:
 		return http.StatusBadRequest, "invalid_command_kind", "unsupported command kind"
 	}
@@ -437,16 +396,19 @@ func (h *commandHandler) validateMove(cmd ticker.Command) (int, string, string) 
 }
 
 func (h *commandHandler) validateGather(cmd ticker.Command) (int, string, string) {
+	if cmd.TargetCoord == nil {
+		return http.StatusBadRequest, "missing_target_coord", "target_coord is required for GATHER"
+	}
 	unit := h.w.GetUnit(cmd.UnitID)
 	if unit.Kind() != entity.KindVillager {
 		return http.StatusBadRequest, "unit_cannot_gather", "only villagers can gather resources"
 	}
-	if h.w.CanDepositCarry(cmd.UnitID) {
-		return 0, "", ""
+	if !hex.InBounds(*cmd.TargetCoord) {
+		return http.StatusBadRequest, "target_out_of_bounds", "target_coord is outside the map"
 	}
-	tile, ok := h.w.Tile(unit.Position())
+	tile, ok := h.w.Tile(*cmd.TargetCoord)
 	if !ok || tile.Terrain.ResourceYield() == terrain.ResourceNone {
-		return http.StatusBadRequest, "no_gatherable_resource", "unit is not standing on a gatherable resource tile"
+		return http.StatusBadRequest, "no_gatherable_resource", "target_coord is not a gatherable resource tile"
 	}
 	return 0, "", ""
 }
@@ -472,19 +434,16 @@ func (h *commandHandler) validateBuild(cmd ticker.Command) (int, string, string)
 	if !hex.InBounds(*cmd.TargetCoord) {
 		return http.StatusBadRequest, "target_out_of_bounds", "target_coord is outside the map"
 	}
-	if hex.Distance(builder.Position(), *cmd.TargetCoord) > 1 {
-		return http.StatusBadRequest, "target_out_of_range", "builder must be adjacent to the build target"
-	}
-	tile, ok := h.w.Tile(*cmd.TargetCoord)
-	if !ok || tile.Terrain != terrain.Plain {
-		return http.StatusBadRequest, "invalid_build_tile", "build target must be a plain tile"
-	}
-	if !h.w.CanOccupy(*cmd.TargetCoord) {
-		return http.StatusBadRequest, "target_occupied", "build target is occupied"
-	}
-	cost := entity.BuildingCost(kind)
-	if !h.canAffordWithPending(cmd.Team, cost, cmd) {
-		return http.StatusBadRequest, "insufficient_resources", "team cannot afford this building"
+	switch h.w.BuildTargetStatus(cmd.Team, kind, *cmd.TargetCoord) {
+	case world.BuildTargetInvalid:
+		return http.StatusBadRequest, "invalid_build_tile", "build target is not valid for this building"
+	case world.BuildTargetCreate:
+		fallthrough
+	case world.BuildTargetBlocked:
+		cost := entity.BuildingCost(kind)
+		if !h.canAffordWithPending(cmd.Team, cost, cmd) {
+			return http.StatusBadRequest, "insufficient_resources", "team cannot afford this building"
+		}
 	}
 	return 0, "", ""
 }
@@ -498,17 +457,11 @@ func (h *commandHandler) validateAttack(cmd ticker.Command) (int, string, string
 		if targetUnit.Team() == attacker.Team() {
 			return http.StatusBadRequest, "friendly_fire_forbidden", "cannot attack a friendly unit"
 		}
-		if hex.Distance(attacker.Position(), targetUnit.Position()) > entity.AttackRange(attacker.Kind()) {
-			return http.StatusBadRequest, "target_out_of_range", "target is outside attack range"
-		}
 		return 0, "", ""
 	}
 	if targetBuilding := h.w.GetBuilding(*cmd.TargetID); targetBuilding != nil {
 		if targetBuilding.Team() == attacker.Team() {
 			return http.StatusBadRequest, "friendly_fire_forbidden", "cannot attack a friendly building"
-		}
-		if hex.Distance(attacker.Position(), targetBuilding.Position()) > entity.AttackRange(attacker.Kind()) {
-			return http.StatusBadRequest, "target_out_of_range", "target is outside attack range"
 		}
 		return 0, "", ""
 	}
@@ -640,5 +593,42 @@ func toCommandView(cmd ticker.Command) commandView {
 		TargetID:     cmd.TargetID,
 		BuildingKind: cmd.BuildingKind,
 		UnitKind:     cmd.UnitKind,
+	}
+}
+
+func toUnitView(u *entity.Unit, friendly bool) unitView {
+	pos := u.Position()
+	var attackTargetID *entity.EntityID
+	if id, ok := u.AttackTargetID(); ok {
+		attackTargetID = &id
+	}
+	var statusTargetCoord *coordView
+	if coord, ok := u.StatusTargetCoord(); ok {
+		statusTargetCoord = &coordView{Q: coord.Q, R: coord.R}
+	}
+	var statusTargetID *entity.EntityID
+	if id, ok := u.StatusTargetID(); ok {
+		statusTargetID = &id
+	}
+	statusBuildingKind := ""
+	if kind, ok := u.StatusBuildingKind(); ok {
+		statusBuildingKind = kind.String()
+	}
+	return unitView{
+		ID:                 u.ID(),
+		Kind:               u.Kind().String(),
+		Team:               u.Team(),
+		Position:           coordView{Q: pos.Q, R: pos.R},
+		HP:                 u.HP(),
+		MaxHP:              u.MaxHP(),
+		CarryResource:      string(u.CarryType()),
+		CarryAmount:        u.CarryAmount(),
+		Status:             string(u.Status()),
+		StatusPhase:        string(u.StatusPhase()),
+		StatusTargetCoord:  statusTargetCoord,
+		StatusTargetID:     statusTargetID,
+		StatusBuildingKind: statusBuildingKind,
+		AttackTargetID:     attackTargetID,
+		Friendly:           friendly,
 	}
 }

@@ -20,6 +20,7 @@ const (
 	CmdGather    CommandKind = "GATHER"
 	CmdBuild     CommandKind = "BUILD"
 	CmdProduce   CommandKind = "PRODUCE"
+	CmdStop      CommandKind = "STOP"
 )
 
 // Command is an action submitted by an agent for a specific unit.

@@ -26,7 +26,7 @@ func TestCommandHandler_InvalidGatherReturnsCodeAndReason(t *testing.T) {
 	}
 
 	rec := doCommandRequest(t, h, body, "1")
-	assertErrorResponse(t, rec, http.StatusBadRequest, "unit_cannot_gather")
+	assertErrorResponse(t, rec, http.StatusBadRequest, "missing_target_coord")
 }
 
 func TestCommandHandler_MoveOutOfBoundsReturnsCodeAndReason(t *testing.T) {
@@ -48,7 +48,7 @@ func TestCommandHandler_MoveOutOfBoundsReturnsCodeAndReason(t *testing.T) {
 	assertErrorResponse(t, rec, http.StatusBadRequest, "target_out_of_bounds")
 }
 
-func TestCommandHandler_AttackOutOfRangeReturnsCodeAndReason(t *testing.T) {
+func TestCommandHandler_AttackOutOfRangeIsAcceptedForPersistentChase(t *testing.T) {
 	w := world.NewWorld(42)
 	q := ticker.NewQueue()
 	h := &commandHandler{w: w, q: q}
@@ -62,7 +62,9 @@ func TestCommandHandler_AttackOutOfRangeReturnsCodeAndReason(t *testing.T) {
 	}
 
 	rec := doCommandRequest(t, h, body, "1")
-	assertErrorResponse(t, rec, http.StatusBadRequest, "target_out_of_range")
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusAccepted, rec.Body.String())
+	}
 }
 
 func TestCommandHandler_InvalidProducerReturnsCodeAndReason(t *testing.T) {
@@ -270,6 +272,55 @@ func TestCommandsHandler_ReflectsLastCommandWins(t *testing.T) {
 	if resp.Commands[0].TargetCoord == nil || resp.Commands[0].TargetCoord.Q != second.Q || resp.Commands[0].TargetCoord.R != second.R {
 		t.Fatalf("unexpected target coord: %+v", resp.Commands[0].TargetCoord)
 	}
+}
+
+func TestStateHandler_ExposesPersistentUnitStatus(t *testing.T) {
+	w := world.NewWorld(42)
+	h := &stateHandler{w: w}
+
+	unit := w.UnitsByTeam(entity.Team1)[0]
+	target := hex.Coord{Q: 7, R: 4}
+	w.WriteFunc(func() {
+		unit.SetMoveStatus(entity.StatusMovingFast, target)
+		unit.SetStatusPhase(entity.PhaseMovingToTarget)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/state", nil)
+	req.Header.Set("X-Team-ID", "1")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var resp struct {
+		Units []struct {
+			ID                entity.EntityID `json:"id"`
+			Status            string          `json:"status"`
+			StatusPhase       string          `json:"status_phase,omitempty"`
+			StatusTargetCoord *struct {
+				Q int `json:"q"`
+				R int `json:"r"`
+			} `json:"status_target_coord,omitempty"`
+		} `json:"units"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal state response: %v", err)
+	}
+	for _, got := range resp.Units {
+		if got.ID != unit.ID() {
+			continue
+		}
+		if got.Status != string(entity.StatusMovingFast) || got.StatusPhase != string(entity.PhaseMovingToTarget) {
+			t.Fatalf("unexpected status payload: %+v", got)
+		}
+		if got.StatusTargetCoord == nil || got.StatusTargetCoord.Q != target.Q || got.StatusTargetCoord.R != target.R {
+			t.Fatalf("unexpected target coord: %+v", got.StatusTargetCoord)
+		}
+		return
+	}
+	t.Fatalf("expected unit %d in state response", unit.ID())
 }
 
 type commandErrorEnvelope struct {

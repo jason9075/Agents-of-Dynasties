@@ -12,7 +12,8 @@ These rules are written against the current repository state:
 - Coordinates use axial hex coordinates `(q, r)`
 - The game advances in fixed ticks, with `10s` as the default server interval
 - Commands are collected during a tick window and resolved at the next tick boundary
-- Command submission uses last-command-wins semantics per actor
+- Command submission uses last-command-wins semantics per actor for the pending queue
+- Units now keep a persistent action status across ticks
 
 Important: this file defines the intended rules for implementation. The current code now covers the core movement, combat, gathering, construction progress, production timing, and resource depletion loop, but some advanced items in this file are still simplified or partial.
 
@@ -63,23 +64,24 @@ Each tick is resolved in a fixed deterministic order.
 ### Resolution Order
 
 1. Freeze the command queue at the tick boundary.
-2. Sort queued commands in deterministic actor order and merge them with any persistent actor intent.
-3. Validate commands against the current world state.
-4. Resolve movement.
-5. Resolve combat.
-6. Resolve economy actions.
+2. Sort queued commands in deterministic actor order.
+3. Apply queued commands onto persistent actor status.
+4. Resolve movement from the current actor status.
+5. Resolve combat from the current actor status.
+6. Resolve economy actions from the current actor status.
 7. Remove dead entities and finalize state changes.
 8. Recompute LOS for the next visible state snapshot.
 
 ### Persistent and Non-Persistent Commands
 
-- `ATTACK` is persistent across ticks.
-- A persistent `ATTACK` remains active until:
-  - the target dies
-  - the target becomes invalid
-  - the actor can no longer legally continue the attack
+- `MOVE_FAST`, `MOVE_GUARD`, `ATTACK`, `GATHER`, and `BUILD` are persistent unit commands.
+- A persistent unit command remains active until:
+  - the command completes
+  - the target becomes permanently invalid
+  - the actor dies
   - the actor receives a new command
-- `MOVE_FAST`, `MOVE_GUARD`, `GATHER`, `BUILD`, and `PRODUCE` are resolved from the latest command state and may be replaced by a newer command before the next tick.
+  - the actor receives `STOP`
+- `PRODUCE` is not a unit status; it remains a building queue action.
 
 ## Movement Resolution
 
@@ -148,7 +150,8 @@ LOS remains an information and visibility rule, not an attack range rule.
 
 For `ATTACK target_id`:
 
-- the unit keeps pursuing that target across ticks until the command becomes invalid or is replaced
+- the unit keeps pursuing that target across ticks until the command becomes invalid, is replaced, or is stopped
+- if the target is out of range, the attacker keeps closing distance at guarded speed
 - if the target is in attack range during the combat phase, the unit attacks it
 
 For `MOVE_GUARD` auto-engagement:
@@ -196,9 +199,11 @@ This means:
 ### Gathering
 
 - Only `villager` may use `GATHER`.
-- The villager must stand on the target resource tile to gather from it.
+- `GATHER` stores a specific target resource tile.
+- The villager automatically moves to that target resource tile if needed.
 - Gathered resources are carried by the villager.
-- The villager deposits carried resources by using `GATHER` while adjacent to a friendly `town_center`.
+- The villager automatically returns to a friendly `town_center` to deposit carried resources.
+- After depositing, the villager returns to the same resource target and repeats until interrupted or the node is exhausted.
 - Valid gathering targets are:
   - `forest`
   - `gold_mine`
@@ -211,9 +216,10 @@ This means:
 ### Building
 
 - Only `villager` may use `BUILD`.
-- A building may only be placed on a legal, unoccupied target hex.
-- A build command fails if the target hex is occupied, impassable, or otherwise invalid for building placement.
-- A valid build starts an under-construction building that completes after its build time in ticks.
+- `BUILD` stores a target hex and building kind.
+- The villager automatically moves adjacent to the build target if needed.
+- If no site exists yet and the target is valid, the villager starts the construction site.
+- Once the site exists, the villager keeps building until the structure completes, unless interrupted or invalidated.
 
 ### Production
 
@@ -239,10 +245,10 @@ This means:
 
 ### Invalid Commands at Resolution Time
 
-- If a command was valid when submitted but invalid at tick resolution, it is ignored for that tick.
+- If a command was valid when submitted but invalid at tick resolution, it either stays pending as a persistent status that will retry later, or is cleared if the target became permanently invalid.
 - Examples:
   - target died before resolution
-  - target hex became occupied
+  - target hex became permanently invalid for building
   - actor no longer exists
   - actor can no longer legally perform that action
 
@@ -256,13 +262,17 @@ Any implementation based on this document should cover at least these cases:
 - no unit can enter a building hex
 - same-team units cannot stack
 - opposing units trying to move into the same hex both fail to enter it
+- `STOP` clears the unit's persistent status
+- long-distance movement continues across ticks without resubmission
 - `MOVE_FAST` does not auto-engage
 - `MOVE_GUARD` auto-engages after movement
 - `ATTACK` persists across ticks until invalidated or replaced
+- `ATTACK` can close distance across ticks before attacking
 - melee units attack at range `1`
 - `archer` attacks at range `2`
 - simultaneous combat allows mutual kills in the same tick
-- villagers must stand on the resource hex to gather
+- `GATHER` automatically shuttles between a resource node and a friendly `town_center`
+- `BUILD` automatically moves the villager to the site and persists until completion
 - produced units stay queued when no adjacent spawn hex is available
 
 ## Relationship to Other Knowledge Files

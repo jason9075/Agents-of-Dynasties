@@ -8,6 +8,24 @@ import (
 	"github.com/jason9075/agents_of_dynasties/internal/terrain"
 )
 
+type BuildTargetStatus uint8
+
+const (
+	BuildTargetInvalid BuildTargetStatus = iota
+	BuildTargetCreate
+	BuildTargetResume
+	BuildTargetBlocked
+)
+
+type BuildActionResult uint8
+
+const (
+	BuildActionInvalid BuildActionResult = iota
+	BuildActionBlocked
+	BuildActionWorking
+	BuildActionComplete
+)
+
 func isAdjacentToFriendlyTownCenter(buildings map[entity.EntityID]*entity.Building, team entity.Team, pos hex.Coord) bool {
 	for _, b := range buildings {
 		if !b.IsAlive() || !b.IsComplete() || b.Team() != team || b.Kind() != entity.KindTownCenter {
@@ -18,6 +36,15 @@ func isAdjacentToFriendlyTownCenter(buildings map[entity.EntityID]*entity.Buildi
 		}
 	}
 	return false
+}
+
+func buildingAtLocked(buildings map[entity.EntityID]*entity.Building, c hex.Coord) *entity.Building {
+	for _, b := range buildings {
+		if b.IsAlive() && b.Position() == c {
+			return b
+		}
+	}
+	return nil
 }
 
 // PreviewMoveStep returns the next greedy legal step for a unit, if any.
@@ -199,6 +226,82 @@ func (w *World) BuildStructure(builderID entity.EntityID, kind entity.BuildingKi
 	b := entity.NewConstruction(w.nextID(), u.Team(), kind, target)
 	w.Buildings[b.ID()] = b
 	return true
+}
+
+func (w *World) BuildTargetStatus(team entity.Team, kind entity.BuildingKind, target hex.Coord) BuildTargetStatus {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	if !hex.InBounds(target) {
+		return BuildTargetInvalid
+	}
+	if existing := buildingAtLocked(w.Buildings, target); existing != nil {
+		if existing.Team() == team && existing.Kind() == kind && !existing.IsComplete() {
+			return BuildTargetResume
+		}
+		return BuildTargetInvalid
+	}
+	tile, ok := w.Tiles[target]
+	if !ok || tile.Terrain != terrain.Plain {
+		return BuildTargetInvalid
+	}
+	for _, u := range w.Units {
+		if u.IsAlive() && u.Position() == target {
+			return BuildTargetBlocked
+		}
+	}
+	return BuildTargetCreate
+}
+
+func (w *World) WorkOnBuild(builderID entity.EntityID, kind entity.BuildingKind, target hex.Coord) BuildActionResult {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	u := w.Units[builderID]
+	if u == nil || !u.IsAlive() || !entity.UnitCanBuild(u.Kind()) || kind == entity.KindTownCenter {
+		return BuildActionInvalid
+	}
+	if !hex.InBounds(target) || hex.Distance(u.Position(), target) > 1 {
+		return BuildActionInvalid
+	}
+
+	if existing := buildingAtLocked(w.Buildings, target); existing != nil {
+		if existing.Team() != u.Team() || existing.Kind() != kind {
+			return BuildActionInvalid
+		}
+		if existing.IsComplete() {
+			return BuildActionComplete
+		}
+		existing.AdvanceConstruction()
+		if existing.IsComplete() {
+			return BuildActionComplete
+		}
+		return BuildActionWorking
+	}
+
+	tile, ok := w.Tiles[target]
+	if !ok || tile.Terrain != terrain.Plain {
+		return BuildActionInvalid
+	}
+	for _, other := range w.Units {
+		if other.IsAlive() && other.Position() == target {
+			return BuildActionBlocked
+		}
+	}
+
+	cost := entity.BuildingCost(kind)
+	if !w.canAffordLocked(u.Team(), cost) {
+		return BuildActionBlocked
+	}
+	w.payLocked(u.Team(), cost)
+
+	b := entity.NewConstruction(w.nextID(), u.Team(), kind, target)
+	b.AdvanceConstruction()
+	w.Buildings[b.ID()] = b
+	if b.IsComplete() {
+		return BuildActionComplete
+	}
+	return BuildActionWorking
 }
 
 // AttackTarget applies one attack from attacker to a target entity if in range.
@@ -436,6 +539,27 @@ func (w *World) ProcessConstruction() {
 	}
 }
 
+func (w *World) FindNearestFriendlyTownCenter(team entity.Team, from hex.Coord) (hex.Coord, bool) {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	best := hex.Coord{}
+	bestDist := 0
+	found := false
+	for _, b := range w.Buildings {
+		if !b.IsAlive() || !b.IsComplete() || b.Team() != team || b.Kind() != entity.KindTownCenter {
+			continue
+		}
+		dist := hex.Distance(from, b.Position())
+		if !found || dist < bestDist {
+			best = b.Position()
+			bestDist = dist
+			found = true
+		}
+	}
+	return best, found
+}
+
 func (w *World) canAffordLocked(team entity.Team, cost entity.Cost) bool {
 	res := w.TeamRes[team]
 	return res.Food >= cost.Food &&
@@ -521,6 +645,19 @@ func (w *World) CanOccupy(c hex.Coord) bool {
 		}
 	}
 	return true
+}
+
+func (w *World) IsGatherableResource(c hex.Coord) bool {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	tile, ok := w.Tiles[c]
+	return ok && tile.Terrain.ResourceYield() != terrain.ResourceNone
+}
+
+func (w *World) BuildingAt(c hex.Coord) *entity.Building {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return buildingAtLocked(w.Buildings, c)
 }
 
 // CanDepositCarry reports whether a villager can deposit carried resources now.
