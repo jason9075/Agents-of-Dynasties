@@ -47,8 +47,13 @@ func buildingAtLocked(buildings map[entity.EntityID]*entity.Building, c hex.Coor
 	return nil
 }
 
-// PreviewMoveStep returns the next greedy legal step for a unit, if any.
+// PreviewMoveStep returns the first step on a shortest legal path to target, if any.
 func (w *World) PreviewMoveStep(unitID entity.EntityID, target hex.Coord) (hex.Coord, bool) {
+	return w.PreviewMoveStepToAny(unitID, []hex.Coord{target})
+}
+
+// PreviewMoveStepToAny returns the first step on a shortest legal path to any target, if any.
+func (w *World) PreviewMoveStepToAny(unitID entity.EntityID, targets []hex.Coord) (hex.Coord, bool) {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 
@@ -58,26 +63,48 @@ func (w *World) PreviewMoveStep(unitID entity.EntityID, target hex.Coord) (hex.C
 	}
 
 	cur := u.Position()
-	if cur == target {
-		return hex.Coord{}, false
-	}
-
-	best := cur
-	bestDist := hex.Distance(cur, target)
-	for _, candidate := range cur.Neighbors() {
-		if !hex.InBounds(candidate) || !w.canUnitOccupyLocked(u.Kind(), candidate, unitID, 0) {
+	goalSet := make(map[hex.Coord]struct{}, len(targets))
+	for _, target := range targets {
+		if !hex.InBounds(target) {
 			continue
 		}
-		if dist := hex.Distance(candidate, target); dist < bestDist {
-			best = candidate
-			bestDist = dist
+		goalSet[target] = struct{}{}
+	}
+	if len(goalSet) == 0 {
+		return hex.Coord{}, false
+	}
+	if _, ok := goalSet[cur]; ok {
+		return hex.Coord{}, false
+	}
+
+	queue := []hex.Coord{cur}
+	visited := map[hex.Coord]bool{cur: true}
+	parent := make(map[hex.Coord]hex.Coord, len(goalSet))
+
+	for head := 0; head < len(queue); head++ {
+		pos := queue[head]
+		for _, next := range pos.Neighbors() {
+			if !hex.InBounds(next) || visited[next] {
+				continue
+			}
+			if !w.canUnitOccupyLocked(u.Kind(), next, unitID, 0) {
+				continue
+			}
+
+			visited[next] = true
+			parent[next] = pos
+			if _, ok := goalSet[next]; ok {
+				step := next
+				for parent[step] != cur {
+					step = parent[step]
+				}
+				return step, true
+			}
+			queue = append(queue, next)
 		}
 	}
 
-	if best == cur {
-		return hex.Coord{}, false
-	}
-	return best, true
+	return hex.Coord{}, false
 }
 
 // ApplyUnitMoves applies accepted movement results simultaneously.
@@ -92,39 +119,19 @@ func (w *World) ApplyUnitMoves(moves map[entity.EntityID]hex.Coord) {
 	}
 }
 
-// MoveUnitToward moves the unit toward target up to speed steps using greedy hex distance.
+// MoveUnitToward moves the unit toward target up to speed steps using shortest-path routing.
 func (w *World) MoveUnitToward(unitID entity.EntityID, target hex.Coord, speed int) bool {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	u := w.Units[unitID]
-	if u == nil || !u.IsAlive() || speed <= 0 {
+	if speed <= 0 {
 		return false
 	}
 
 	moved := false
 	for step := 0; step < speed; step++ {
-		cur := u.Position()
-		if cur == target {
+		next, ok := w.PreviewMoveStep(unitID, target)
+		if !ok {
 			break
 		}
-
-		best := cur
-		bestDist := hex.Distance(cur, target)
-		for _, candidate := range cur.Neighbors() {
-			if !hex.InBounds(candidate) || !w.canUnitOccupyLocked(u.Kind(), candidate, unitID, 0) {
-				continue
-			}
-			if dist := hex.Distance(candidate, target); dist < bestDist {
-				best = candidate
-				bestDist = dist
-			}
-		}
-
-		if best == cur {
-			break
-		}
-		u.SetPosition(best)
+		w.ApplyUnitMoves(map[entity.EntityID]hex.Coord{unitID: next})
 		moved = true
 	}
 
@@ -645,6 +652,16 @@ func (w *World) CanOccupy(c hex.Coord) bool {
 		}
 	}
 	return true
+}
+
+// CanUnitOccupy reports whether the given unit kind may currently enter c.
+func (w *World) CanUnitOccupy(kind entity.UnitKind, c hex.Coord, ignoreUnitID entity.EntityID) bool {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	if !hex.InBounds(c) {
+		return false
+	}
+	return w.canUnitOccupyLocked(kind, c, ignoreUnitID, 0)
 }
 
 func (w *World) IsGatherableResource(c hex.Coord) bool {

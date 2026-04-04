@@ -90,7 +90,8 @@ Each tick is resolved in a fixed deterministic order.
 - `MOVE_FAST` uses the unit's `SpeedFast`.
 - `MOVE_GUARD` uses the unit's `SpeedGuard`.
 - A unit may move up to its speed in hexes during the movement phase.
-- Movement follows a legal path toward the target coordinate.
+- Movement follows a shortest legal path toward the target coordinate or approach hex.
+- Pathfinding may route around `lake`, `mountain`, forest restrictions, and other occupied hexes if a legal path exists.
 - A step is illegal if the destination hex is:
   - out of bounds
   - impassable for that unit type
