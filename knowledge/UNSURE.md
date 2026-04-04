@@ -257,11 +257,11 @@ Current direction:
 
 Open question:
 
-- should Town Centers ever be rebuildable after destruction
+- should Town Centers ever be rebuildable after destruction (Currently confirmed **NO**: Town Center destruction is the definitive Win Condition leading to `GameOver`)
 
 Why this needs attention:
 
-- this is a major win-condition and comeback design decision
+- this was a major win-condition and comeback design decision, but is now resolved.
 
 ## 5. API and Information Exposure Questions
 

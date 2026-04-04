@@ -66,6 +66,8 @@ type World struct {
 	LastTickContests  []ContestedHex
 	Tick              uint64
 	idCounter         atomic.Uint64
+	GameOver          bool
+	Winner            string
 }
 
 // NewWorld creates and seeds a new world using the given seed.
@@ -84,6 +86,8 @@ func NewWorld(seed int64) *World {
 			entity.Team2: nil,
 		},
 		LastTickContests: nil,
+		GameOver:         false,
+		Winner:           "",
 	}
 	generate(w, seed)
 	return w
@@ -214,6 +218,51 @@ func (w *World) IncrementTick() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.Tick++
+}
+
+func (w *World) IsGameOver() bool {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.GameOver
+}
+
+func (w *World) GetWinner() string {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.Winner
+}
+
+func (w *World) EvaluateWinCondition() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.GameOver {
+		return
+	}
+
+	team1HasTC := false
+	team2HasTC := false
+
+	for _, b := range w.Buildings {
+		if b.IsAlive() && b.Kind() == entity.KindTownCenter {
+			if b.Team() == entity.Team1 {
+				team1HasTC = true
+			} else if b.Team() == entity.Team2 {
+				team2HasTC = true
+			}
+		}
+	}
+
+	if !team1HasTC && !team2HasTC {
+		w.GameOver = true
+		w.Winner = "draw"
+	} else if !team1HasTC {
+		w.GameOver = true
+		w.Winner = string(entity.Team2)
+	} else if !team2HasTC {
+		w.GameOver = true
+		w.Winner = string(entity.Team1)
+	}
 }
 
 // GetResources returns a copy of the given team's resources.

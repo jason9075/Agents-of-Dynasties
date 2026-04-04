@@ -104,6 +104,8 @@ type populationView struct {
 }
 
 type stateResponse struct {
+	GameOver               bool                `json:"game_over"`
+	Winner                 string              `json:"winner,omitempty"`
 	Tick                   uint64              `json:"tick"`
 	Resources              world.Resources     `json:"resources"`
 	Population             populationView      `json:"population"`
@@ -212,6 +214,8 @@ func (h *stateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := stateResponse{
+		GameOver:               h.w.IsGameOver(),
+		Winner:                 h.w.GetWinner(),
 		Tick:                   h.w.GetTick(),
 		Resources:              h.w.GetResources(team),
 		Population:             toPopulationView(h.w.GetPopulationSummary(team)),
@@ -241,6 +245,8 @@ type commandAcceptedResponse struct {
 }
 
 type fullStateResponse struct {
+	GameOver               bool               `json:"game_over"`
+	Winner                 string             `json:"winner,omitempty"`
 	Tick                   uint64             `json:"tick"`
 	LastTickContestedHexes []contestedHexView `json:"last_tick_contested_hexes"`
 	Team1                  fullStateTeam      `json:"team1"`
@@ -290,6 +296,8 @@ func (h *fullStateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := fullStateResponse{
+		GameOver:               h.w.IsGameOver(),
+		Winner:                 h.w.GetWinner(),
 		Tick:                   h.w.GetTick(),
 		LastTickContestedHexes: toContestedHexViews(h.w.GetLastTickContestedHexes()),
 		Team1:                  teamData(entity.Team1),
@@ -351,6 +359,11 @@ func (h *commandHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	team, err := teamFromRequest(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_team_header", err.Error())
+		return
+	}
+
+	if h.w.IsGameOver() {
+		writeError(w, http.StatusBadRequest, "game_over", "the match has already ended")
 		return
 	}
 

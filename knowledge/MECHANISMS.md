@@ -17,6 +17,13 @@ These rules are written against the current repository state:
 
 Important: this file defines the intended rules for implementation. The current code now covers the core movement, combat, gathering, construction progress, production timing, and resource depletion loop, but some advanced items in this file are still simplified or partial.
 
+## Win Conditions & Draw
+
+The game resolves victory or a draw exclusively around the survival of the **Town Center**:
+- **Victory**: If a team's Town Center is destroyed (HP <= 0 or deleted), the game enters a `GameOver` state, and the surviving team earns the victory.
+- **Draw**: If both teams' Town Centers are destroyed during the same tick (e.g., through simultaneous combat resolution), the game enters a `GameOver` state, and the match is declared a draw.
+- Once the game is over, the server will block any further pending commands for that game state.
+
 ## Design Goals
 
 The mechanisms in this file follow these priorities:

@@ -663,3 +663,64 @@ func TestStep_StopClearsPersistentUnitStatus(t *testing.T) {
 func ptrID(id entity.EntityID) *entity.EntityID {
 	return &id
 }
+
+func TestWinCondition_Team1Wins(t *testing.T) {
+	w := world.NewWorld(42)
+	q := NewQueue()
+	tk := New(w, q, time.Second)
+
+	var t2TC *entity.Building
+	for _, b := range w.BuildingsByTeam(entity.Team2) {
+		if b.Kind() == entity.KindTownCenter {
+			t2TC = b
+			break
+		}
+	}
+	if t2TC == nil {
+		t.Fatalf("expected Team2 to have a TC")
+	}
+
+	w.DeleteEntity(entity.Team2, t2TC.ID())
+
+	tk.step()
+
+	if !w.IsGameOver() {
+		t.Fatalf("expected GameOver to be true")
+	}
+	if w.GetWinner() != string(entity.Team1) {
+		t.Fatalf("expected Team1 to win, got %s", w.GetWinner())
+	}
+}
+
+func TestWinCondition_Draw(t *testing.T) {
+	w := world.NewWorld(42)
+	q := NewQueue()
+	tk := New(w, q, time.Second)
+
+	var t1TC *entity.Building
+	for _, b := range w.BuildingsByTeam(entity.Team1) {
+		if b.Kind() == entity.KindTownCenter {
+			t1TC = b
+			break
+		}
+	}
+	var t2TC *entity.Building
+	for _, b := range w.BuildingsByTeam(entity.Team2) {
+		if b.Kind() == entity.KindTownCenter {
+			t2TC = b
+			break
+		}
+	}
+
+	w.DeleteEntity(entity.Team1, t1TC.ID())
+	w.DeleteEntity(entity.Team2, t2TC.ID())
+
+	tk.step()
+
+	if !w.IsGameOver() {
+		t.Fatalf("expected GameOver to be true")
+	}
+	if w.GetWinner() != "draw" {
+		t.Fatalf("expected a draw, got %s", w.GetWinner())
+	}
+}

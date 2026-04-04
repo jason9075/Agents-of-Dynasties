@@ -86,6 +86,7 @@ func (t *Ticker) step() {
 	t.world.SetLastTickCommandFailures(entity.Team1, failures[entity.Team1])
 	t.world.SetLastTickCommandFailures(entity.Team2, failures[entity.Team2])
 	t.world.SetLastTickContestedHexes(contests)
+	t.world.EvaluateWinCondition()
 	t.world.IncrementTick()
 }
 

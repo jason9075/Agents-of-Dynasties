@@ -95,6 +95,8 @@ Returns current game state filtered by your team's **Line of Sight (LOS)**.
 **Response:**
 ```json
 {
+  "game_over": false,
+  "winner": "",
   "tick": 5,
   "resources": {
     "food":  185,
@@ -277,7 +279,7 @@ Submits an action for one of your units. Returns `202 Accepted` immediately with
 
 **Response codes:**
 - `202 Accepted` — command queued successfully.
-- `400 Bad Request` — malformed JSON, missing required fields, insufficient resources, population cap reached, or illegal command.
+- `400 Bad Request` — malformed JSON, missing required fields, insufficient resources, population cap reached, illegal command, or `game_over` (the match has already ended).
 - `403 Forbidden` — the unit does not belong to your team.
 - `404 Not Found` — unit ID does not exist.
 
