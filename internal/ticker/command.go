@@ -15,13 +15,15 @@ import (
 type CommandKind string
 
 const (
-	CmdMoveFast  CommandKind = "MOVE_FAST"
-	CmdMoveGuard CommandKind = "MOVE_GUARD"
-	CmdAttack    CommandKind = "ATTACK"
-	CmdGather    CommandKind = "GATHER"
-	CmdBuild     CommandKind = "BUILD"
-	CmdProduce   CommandKind = "PRODUCE"
-	CmdStop      CommandKind = "STOP"
+	CmdMoveFast      CommandKind = "MOVE_FAST"
+	CmdMoveGuard     CommandKind = "MOVE_GUARD"
+	CmdAttack        CommandKind = "ATTACK"
+	CmdGather        CommandKind = "GATHER"
+	CmdBuild         CommandKind = "BUILD"
+	CmdProduce       CommandKind = "PRODUCE"
+	CmdCancelProduce CommandKind = "CANCEL_PRODUCE"
+	CmdStop          CommandKind = "STOP"
+	CmdDelete        CommandKind = "DELETE"
 )
 
 // Command is an action submitted by an agent for a specific unit.

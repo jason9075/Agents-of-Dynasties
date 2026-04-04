@@ -258,6 +258,8 @@ Submits an action for one of your units. Returns `202 Accepted` immediately with
 | `GATHER`      | `target_coord`                           | Villager persistently gathers from that node, returns to a friendly `town_center`, deposits, and repeats |
 | `BUILD`       | `target_coord`, `building_kind`          | Villager persistently moves to the target and keeps building until completion |
 | `PRODUCE`     | `building_id`, `unit_kind`               | Queue a unit in the specified building                    |
+| `CANCEL_PRODUCE`| `building_id`                        | Cancel the most recently queued unit in the building and fully refund its cost and reserved population |
+| `DELETE`      | `unit_id` or `building_id`               | Instantly destroy the target friendly entity (no unit cost refunded, but population is freed). Deleting a building immediately refunds its active queue. |
 | `STOP`        | `unit_id`                                | Clear the unit's current persistent status and return it to `IDLE` |
 
 **`building_kind` values:** `"barracks"`, `"stable"`, `"archery_range"`

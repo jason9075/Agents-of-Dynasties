@@ -123,6 +123,7 @@ Why reserve population on queue:
 - it prevents hidden overproduction
 - it gives agents a stable "future army size" signal
 - it keeps queue behavior deterministic under a small `20`-pop cap
+- **Refunds & Cancellations**: If an agent issues `CANCEL_PRODUCE` or the generating building is destroyed (either via combat or `DELETE`), the queued units are fully refunded, instantly returning their resource costs and reserved population slots.
 
 ### Gathering Rules
 

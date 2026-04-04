@@ -96,6 +96,30 @@ func (b *Building) DequeueNext() (UnitKind, bool) {
 	return k, true
 }
 
+// PopProductionQueue removes and returns the back of the queue (ok=false if empty).
+func (b *Building) PopProductionQueue() (UnitKind, bool) {
+	if len(b.queue) == 0 {
+		return 0, false
+	}
+	lastIdx := len(b.queue) - 1
+	k := b.queue[lastIdx].Kind
+	b.queue = b.queue[:lastIdx]
+	return k, true
+}
+
+// ClearQueue empties the queue and returns all items that were in it.
+func (b *Building) ClearQueue() []UnitKind {
+	if len(b.queue) == 0 {
+		return nil
+	}
+	kinds := make([]UnitKind, 0, len(b.queue))
+	for _, item := range b.queue {
+		kinds = append(kinds, item.Kind)
+	}
+	b.queue = nil
+	return kinds
+}
+
 // QueueLen returns how many units are queued.
 func (b *Building) QueueLen() int { return len(b.queue) }
 

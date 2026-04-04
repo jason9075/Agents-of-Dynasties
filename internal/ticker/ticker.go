@@ -125,6 +125,23 @@ func (t *Ticker) applySubmittedCommands(cmds []Command, tick uint64) map[entity.
 			case world.ProductionEnqueuePopulationCapReached:
 				failures[cmd.Team] = append(failures[cmd.Team], commandFailure(cmd, tick, "population_cap_reached_at_resolution", "team population cap would be exceeded at resolution"))
 			}
+		case CmdCancelProduce:
+			if cmd.BuildingID == nil {
+				continue
+			}
+			if !t.world.CancelProduction(*cmd.BuildingID) {
+				failures[cmd.Team] = append(failures[cmd.Team], commandFailure(cmd, tick, "cancel_failed", "building queue is empty or building is invalid"))
+			}
+		case CmdDelete:
+			var targetID entity.EntityID
+			if cmd.BuildingID != nil {
+				targetID = *cmd.BuildingID
+			} else {
+				targetID = cmd.UnitID
+			}
+			if !t.world.DeleteEntity(cmd.Team, targetID) {
+				failures[cmd.Team] = append(failures[cmd.Team], commandFailure(cmd, tick, "delete_failed", "target entity does not exist or does not belong to team"))
+			}
 		case CmdStop:
 			if u := t.world.GetUnit(cmd.UnitID); u != nil {
 				u.ClearStatus()

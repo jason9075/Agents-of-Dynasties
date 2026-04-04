@@ -207,3 +207,55 @@ func TestEnqueueProduction_RejectsWhenPopulationCapReached(t *testing.T) {
 		t.Fatalf("expected production enqueue to fail at population cap")
 	}
 }
+
+func TestCancelProduce_RefundsCost(t *testing.T) {
+	w := NewWorld(42)
+	tc := w.BuildingsByTeam(entity.Team1)[0]
+	start := w.GetResources(entity.Team1)
+	
+	w.EnqueueProduction(tc.ID(), entity.KindVillager)
+	afterEnqueue := w.GetResources(entity.Team1)
+	if afterEnqueue.Food == start.Food {
+		t.Fatalf("expected food to decrease on enqueue")
+	}
+	
+	if !w.CancelProduction(tc.ID()) {
+		t.Fatalf("expected cancel to succeed")
+	}
+	
+	afterCancel := w.GetResources(entity.Team1)
+	if afterCancel.Food != start.Food {
+		t.Fatalf("expected food to be fully refunded, got %d want %d", afterCancel.Food, start.Food)
+	}
+}
+
+func TestDeleteEntity_RemovesUnit(t *testing.T) {
+	w := NewWorld(42)
+	u := w.UnitsByTeam(entity.Team1)[0]
+	
+	if !w.DeleteEntity(entity.Team1, u.ID()) {
+		t.Fatalf("expected delete to succeed")
+	}
+	
+	if w.GetUnit(u.ID()) != nil {
+		t.Fatalf("expected unit to be deleted")
+	}
+}
+
+func TestBuildingDestroyed_RefundsQueue(t *testing.T) {
+	w := NewWorld(42)
+	tc := w.BuildingsByTeam(entity.Team1)[0]
+	start := w.GetResources(entity.Team1)
+
+	// enqueue 2 villagers
+	w.EnqueueProduction(tc.ID(), entity.KindVillager)
+	w.EnqueueProduction(tc.ID(), entity.KindVillager)
+	
+	// simulate destruction
+	w.ApplyDamage(map[entity.EntityID]int{tc.ID(): tc.MaxHP()})
+	
+	afterDestroy := w.GetResources(entity.Team1)
+	if afterDestroy.Food != start.Food {
+		t.Fatalf("expected full refund on building destruction, got %v want %v", afterDestroy.Food, start.Food)
+	}
+}

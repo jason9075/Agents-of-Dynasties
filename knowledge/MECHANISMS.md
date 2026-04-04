@@ -198,6 +198,7 @@ This means:
 - Any unit or building reduced to `HP <= 0` is considered dead.
 - Dead entities are removed after simultaneous damage has been applied.
 - Removed entities do not persist into the next tick.
+- **Refund Triggers**: If a building containing queued production units is destroyed (either via combat damage or the `DELETE` command), all pending items in its queue are fully refunded to the owning team's resources and population pool instantly upon removal.
 
 ## Economy Actions
 

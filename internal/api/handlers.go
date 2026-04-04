@@ -362,9 +362,9 @@ func (h *commandHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	cmd.Team = team
 
 	switch cmd.Kind {
-	case ticker.CmdProduce:
+	case ticker.CmdProduce, ticker.CmdCancelProduce:
 		if cmd.BuildingID == nil {
-			writeError(w, http.StatusBadRequest, "missing_building_id", "building_id is required for PRODUCE")
+			writeError(w, http.StatusBadRequest, "missing_building_id", "building_id is required for "+string(cmd.Kind))
 			return
 		}
 		building := h.w.GetBuilding(*cmd.BuildingID)
@@ -375,6 +375,28 @@ func (h *commandHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if building.Team() != team {
 			writeError(w, http.StatusForbidden, "building_wrong_team", "building does not belong to your team")
 			return
+		}
+	case ticker.CmdDelete:
+		if cmd.BuildingID != nil {
+			building := h.w.GetBuilding(*cmd.BuildingID)
+			if building == nil {
+				writeError(w, http.StatusNotFound, "building_not_found", "building not found")
+				return
+			}
+			if building.Team() != team {
+				writeError(w, http.StatusForbidden, "building_wrong_team", "building does not belong to your team")
+				return
+			}
+		} else {
+			unit := h.w.GetUnit(cmd.UnitID)
+			if unit == nil {
+				writeError(w, http.StatusNotFound, "unit_not_found", "unit not found")
+				return
+			}
+			if unit.Team() != team {
+				writeError(w, http.StatusForbidden, "unit_wrong_team", "unit does not belong to your team")
+				return
+			}
 		}
 	default:
 		unit := h.w.GetUnit(cmd.UnitID)
@@ -415,11 +437,23 @@ func (h *commandHandler) validateCommand(cmd ticker.Command) (int, string, strin
 		return h.validateAttack(cmd)
 	case ticker.CmdProduce:
 		return h.validateProduce(cmd)
+	case ticker.CmdCancelProduce:
+		return h.validateCancelProduce(cmd)
+	case ticker.CmdDelete:
+		return 0, "", ""
 	case ticker.CmdStop:
 		return 0, "", ""
 	default:
 		return http.StatusBadRequest, "invalid_command_kind", "unsupported command kind"
 	}
+}
+
+func (h *commandHandler) validateCancelProduce(cmd ticker.Command) (int, string, string) {
+	building := h.w.GetBuilding(*cmd.BuildingID)
+	if building.QueueLen() == 0 {
+		return http.StatusBadRequest, "queue_empty", "building has no units in production queue"
+	}
+	return 0, "", ""
 }
 
 func (h *commandHandler) validateMove(cmd ticker.Command) (int, string, string) {

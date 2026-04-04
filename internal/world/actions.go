@@ -668,9 +668,26 @@ func (w *World) ApplyDamage(damage map[entity.EntityID]int) {
 	}
 	for id, b := range w.Buildings {
 		if !b.IsAlive() {
+			refundBuildingQueueLocked(w, b)
 			delete(w.Buildings, id)
 		}
 	}
+}
+
+func refundBuildingQueueLocked(w *World, b *entity.Building) {
+	kinds := b.ClearQueue()
+	if len(kinds) == 0 {
+		return
+	}
+	res := w.TeamRes[b.Team()]
+	for _, k := range kinds {
+		cost := entity.UnitCost(k)
+		res.Food += cost.Food
+		res.Gold += cost.Gold
+		res.Stone += cost.Stone
+		res.Wood += cost.Wood
+	}
+	w.TeamRes[b.Team()] = res
 }
 
 func pickContestTarget(attacker contestUnit, contestants []contestUnit) (contestUnit, bool) {
@@ -931,4 +948,49 @@ func findFirstOpenSpawnCoord(w *World, origin hex.Coord, occupied map[hex.Coord]
 		}
 	}
 	return hex.Coord{}, false
+}
+
+// CancelProduction pops the last item from the queue and refunds its cost.
+func (w *World) CancelProduction(buildingID entity.EntityID) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	b := w.Buildings[buildingID]
+	if b == nil || !b.IsAlive() {
+		return false
+	}
+	kind, ok := b.PopProductionQueue()
+	if !ok {
+		return false
+	}
+	cost := entity.UnitCost(kind)
+	res := w.TeamRes[b.Team()]
+	res.Food += cost.Food
+	res.Gold += cost.Gold
+	res.Stone += cost.Stone
+	res.Wood += cost.Wood
+	w.TeamRes[b.Team()] = res
+	return true
+}
+
+// DeleteEntity kills a unit or building matching the given ID without refunding its own cost.
+// For buildings, this will trigger the queue refund via internal refunding.
+func (w *World) DeleteEntity(team entity.Team, targetID entity.EntityID) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if u := w.Units[targetID]; u != nil && u.IsAlive() && u.Team() == team {
+		u.SetHP(0)
+		delete(w.Units, targetID)
+		return true
+	}
+
+	if b := w.Buildings[targetID]; b != nil && b.IsAlive() && b.Team() == team {
+		b.SetHP(0)
+		refundBuildingQueueLocked(w, b)
+		delete(w.Buildings, targetID)
+		return true
+	}
+
+	return false
 }
