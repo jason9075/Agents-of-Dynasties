@@ -641,6 +641,10 @@
       let tileMap = {} // "q,r" → tile
       let entityMap = {} // "q,r" → [{type, data}]
       let sidebarVisible = true
+      let unitAnimations = {} // unit id → animation state
+      let animationFrameId = null
+
+      const UNIT_MOVE_ANIMATION_MS = 700
 
       // ── Fetch ──────────────────────────────────────────────────────────────────
 
@@ -653,8 +657,10 @@
       }
 
       async function fetchState() {
+        const prevUnitsByID = buildUnitMap(gameState)
         const res = await fetch('/state/full')
         gameState = await res.json()
+        syncUnitAnimations(prevUnitsByID, gameState)
         entityMap = {}
         const add = (type, data) => {
           const k = `${data.position.q},${data.position.r}`
@@ -664,6 +670,107 @@
         for (const u of gameState.team2.units || []) add('unit', u)
         for (const b of gameState.team1.buildings || []) add('building', b)
         for (const b of gameState.team2.buildings || []) add('building', b)
+      }
+
+      function buildUnitMap(state) {
+        if (!state) return {}
+        const units = [...(state.team1.units || []), ...(state.team2.units || [])]
+        return Object.fromEntries(units.map((u) => [String(u.id), u]))
+      }
+
+      function getUnitPixelPosition(unit) {
+        const animation = unitAnimations[String(unit.id)]
+        if (!animation) return hexToPixel(unit.position.q, unit.position.r)
+
+        const now = performance.now()
+        const progress = Math.min(
+          1,
+          (now - animation.startedAt) / animation.durationMs,
+        )
+
+        if (progress >= 1) {
+          delete unitAnimations[String(unit.id)]
+          return hexToPixel(animation.to.q, animation.to.r)
+        }
+
+        const from = hexToPixel(animation.from.q, animation.from.r)
+        const to = hexToPixel(animation.to.q, animation.to.r)
+        const eased = 1 - Math.pow(1 - progress, 3)
+        return {
+          x: from.x + (to.x - from.x) * eased,
+          y: from.y + (to.y - from.y) * eased,
+        }
+      }
+
+      function getAnimatedCoord(animation) {
+        const now = performance.now()
+        const progress = Math.min(
+          1,
+          (now - animation.startedAt) / animation.durationMs,
+        )
+        if (progress >= 1) return animation.to
+
+        const eased = 1 - Math.pow(1 - progress, 3)
+        return {
+          q: animation.from.q + (animation.to.q - animation.from.q) * eased,
+          r: animation.from.r + (animation.to.r - animation.from.r) * eased,
+        }
+      }
+
+      function syncUnitAnimations(prevUnitsByID, nextState) {
+        const nextUnits = buildUnitMap(nextState)
+        const nextAnimations = {}
+
+        for (const [id, nextUnit] of Object.entries(nextUnits)) {
+          const prevUnit = prevUnitsByID[id]
+          const existing = unitAnimations[id]
+
+          if (!prevUnit) {
+            continue
+          }
+
+          const moved =
+            prevUnit.position.q !== nextUnit.position.q ||
+            prevUnit.position.r !== nextUnit.position.r
+
+          if (!moved && existing) {
+            continue
+          }
+
+          if (!moved) {
+            continue
+          }
+
+          nextAnimations[id] = {
+            from: existing ? getAnimatedCoord(existing) : prevUnit.position,
+            to: nextUnit.position,
+            startedAt: performance.now(),
+            durationMs: UNIT_MOVE_ANIMATION_MS,
+          }
+        }
+
+        unitAnimations = nextAnimations
+
+        if (Object.keys(unitAnimations).length > 0) {
+          startAnimationLoop()
+        }
+      }
+
+      function startAnimationLoop() {
+        if (animationFrameId !== null) return
+
+        const step = () => {
+          animationFrameId = null
+          if (!gameState) return
+
+          drawMap()
+
+          if (Object.keys(unitAnimations).length > 0) {
+            animationFrameId = requestAnimationFrame(step)
+          }
+        }
+
+        animationFrameId = requestAnimationFrame(step)
       }
 
       // ── Draw ───────────────────────────────────────────────────────────────────
@@ -719,7 +826,10 @@
           ctx.stroke()
         }
 
-        if (!gameState) return
+        if (!gameState) {
+          ctx.restore()
+          return
+        }
 
         // ── 2. Buildings ──
         for (const b of [
@@ -755,7 +865,7 @@
           ...(gameState.team1.units || []),
           ...(gameState.team2.units || []),
         ]) {
-          const { x, y } = hexToPixel(u.position.q, u.position.r)
+          const { x, y } = getUnitPixelPosition(u)
           const cx = x + PAD,
             cy = y + PAD
           const img = images[`assets/units/team${u.team}/${u.kind}.png`]
@@ -902,7 +1012,7 @@
         let html = `<b>(${q}, ${r})</b> ${tile.terrain.replace(/_/g, ' ')}`
         if (entities) {
           for (const { type, data } of entities) {
-            html += `<br>Team ${data.team} · ${data.kind.replace(
+            html += `<br>#${data.id} · Team ${data.team} · ${data.kind.replace(
               /_/g,
               ' ',
             )} HP ${data.hp}/${data.max_hp}`
@@ -962,7 +1072,7 @@
         if (mapData) drawMap()
       })
       fetchAndDraw()
-      setInterval(fetchAndDraw, 3000)
+      setInterval(fetchAndDraw, 1000)
     </script>
   </body>
 </html>

@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/jason9075/agents_of_dynasties/internal/entity"
 	"github.com/jason9075/agents_of_dynasties/internal/world"
 )
 
@@ -56,21 +57,66 @@ func (t *Ticker) loop() {
 
 // step processes one game tick: drains the command queue, applies commands,
 // then increments the world tick counter.
-// Phase 1: commands are logged but not yet simulated (movement/combat added in Phase 2+).
 func (t *Ticker) step() {
 	cmds := t.queue.Drain()
 
-	t.world.WriteFunc(func() {
-		tick := t.world.Tick + 1
-		slog.Info("tick", "tick", tick, "commands", len(cmds))
-		for _, cmd := range cmds {
-			slog.Debug("command",
-				"tick", tick,
-				"team", cmd.Team,
-				"unit_id", cmd.UnitID,
-				"kind", cmd.Kind,
-			)
+	tick := t.world.GetTick() + 1
+	slog.Info("tick", "tick", tick, "commands", len(cmds))
+
+	for _, cmd := range cmds {
+		slog.Debug("command",
+			"tick", tick,
+			"team", cmd.Team,
+			"unit_id", cmd.UnitID,
+			"building_id", cmd.BuildingID,
+			"kind", cmd.Kind,
+		)
+		t.applyCommand(cmd)
+	}
+
+	t.world.ProcessProduction()
+	t.world.IncrementTick()
+}
+
+func (t *Ticker) applyCommand(cmd Command) {
+	switch cmd.Kind {
+	case CmdMoveFast, CmdMoveGuard:
+		if cmd.TargetCoord == nil {
+			return
 		}
-		t.world.Tick = tick
-	})
+		u := t.world.GetUnit(cmd.UnitID)
+		if u == nil {
+			return
+		}
+		speed := u.Stats().SpeedFast
+		if cmd.Kind == CmdMoveGuard {
+			speed = u.Stats().SpeedGuard
+		}
+		t.world.MoveUnitToward(cmd.UnitID, *cmd.TargetCoord, speed)
+	case CmdGather:
+		t.world.GatherAtCurrentTile(cmd.UnitID)
+	case CmdBuild:
+		if cmd.TargetCoord == nil || cmd.BuildingKind == nil {
+			return
+		}
+		kind, ok := entity.ParseBuildingKind(*cmd.BuildingKind)
+		if !ok {
+			return
+		}
+		t.world.BuildStructure(cmd.UnitID, kind, *cmd.TargetCoord)
+	case CmdAttack:
+		if cmd.TargetID == nil {
+			return
+		}
+		t.world.AttackTarget(cmd.UnitID, *cmd.TargetID)
+	case CmdProduce:
+		if cmd.BuildingID == nil || cmd.UnitKind == nil {
+			return
+		}
+		kind, ok := entity.ParseUnitKind(*cmd.UnitKind)
+		if !ok {
+			return
+		}
+		t.world.EnqueueProduction(*cmd.BuildingID, kind)
+	}
 }

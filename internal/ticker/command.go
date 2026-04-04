@@ -1,6 +1,7 @@
 package ticker
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -24,6 +25,7 @@ const (
 type Command struct {
 	Team         entity.Team      `json:"team"`
 	UnitID       entity.EntityID  `json:"unit_id"`
+	BuildingID   *entity.EntityID `json:"building_id,omitempty"`
 	Kind         CommandKind      `json:"kind"`
 	TargetCoord  *hex.Coord       `json:"target_coord,omitempty"`
 	TargetID     *entity.EntityID `json:"target_id,omitempty"`
@@ -35,12 +37,12 @@ type Command struct {
 // Queue holds at most one pending command per unit (last-command-wins).
 type Queue struct {
 	mu      sync.Mutex
-	pending map[entity.EntityID]Command
+	pending map[string]Command
 }
 
 // NewQueue creates an empty command queue.
 func NewQueue() *Queue {
-	return &Queue{pending: make(map[entity.EntityID]Command)}
+	return &Queue{pending: make(map[string]Command)}
 }
 
 // Submit records cmd, replacing any prior command for the same unit.
@@ -48,14 +50,14 @@ func (q *Queue) Submit(cmd Command) {
 	cmd.ReceivedAt = time.Now()
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	q.pending[cmd.UnitID] = cmd
+	q.pending[commandActorKey(cmd)] = cmd
 }
 
 // Drain atomically removes and returns all pending commands.
 func (q *Queue) Drain() []Command {
 	q.mu.Lock()
 	old := q.pending
-	q.pending = make(map[entity.EntityID]Command, len(old))
+	q.pending = make(map[string]Command, len(old))
 	q.mu.Unlock()
 
 	cmds := make([]Command, 0, len(old))
@@ -63,4 +65,11 @@ func (q *Queue) Drain() []Command {
 		cmds = append(cmds, c)
 	}
 	return cmds
+}
+
+func commandActorKey(cmd Command) string {
+	if cmd.BuildingID != nil {
+		return fmt.Sprintf("b:%d", *cmd.BuildingID)
+	}
+	return fmt.Sprintf("u:%d", cmd.UnitID)
 }

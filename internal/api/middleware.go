@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -22,9 +23,23 @@ func teamFromRequest(r *http.Request) (entity.Team, error) {
 	return entity.Team(n), nil
 }
 
+type errorBody struct {
+	Code   string `json:"code"`
+	Reason string `json:"reason"`
+}
+
+type errorResponse struct {
+	Error errorBody `json:"error"`
+}
+
 // writeError writes a JSON error response.
-func writeError(w http.ResponseWriter, status int, msg string) {
+func writeError(w http.ResponseWriter, status int, code, reason string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	fmt.Fprintf(w, `{"error":%q}`, msg)
+	_ = json.NewEncoder(w).Encode(errorResponse{
+		Error: errorBody{
+			Code:   code,
+			Reason: reason,
+		},
+	})
 }
