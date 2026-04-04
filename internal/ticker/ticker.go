@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/jason9075/agents_of_dynasties/internal/entity"
+	"github.com/jason9075/agents_of_dynasties/internal/hex"
 	"github.com/jason9075/agents_of_dynasties/internal/world"
 )
 
@@ -17,6 +18,7 @@ type Ticker struct {
 	interval time.Duration
 	stop     chan struct{}
 	done     chan struct{}
+	intents  map[entity.EntityID]Command
 }
 
 // New creates a Ticker. Call Start to begin the game loop.
@@ -27,6 +29,7 @@ func New(w *world.World, q *Queue, interval time.Duration) *Ticker {
 		interval: interval,
 		stop:     make(chan struct{}),
 		done:     make(chan struct{}),
+		intents:  make(map[entity.EntityID]Command),
 	}
 }
 
@@ -71,52 +74,155 @@ func (t *Ticker) step() {
 			"building_id", cmd.BuildingID,
 			"kind", cmd.Kind,
 		)
-		t.applyCommand(cmd)
+		t.recordIntent(cmd)
 	}
 
+	t.resolveMovement(cmds)
+	t.resolveCombat(cmds)
+	t.resolveEconomy(cmds)
+	t.world.ProcessConstruction()
 	t.world.ProcessProduction()
 	t.world.IncrementTick()
 }
 
-func (t *Ticker) applyCommand(cmd Command) {
-	switch cmd.Kind {
-	case CmdMoveFast, CmdMoveGuard:
-		if cmd.TargetCoord == nil {
-			return
+func (t *Ticker) recordIntent(cmd Command) {
+	if cmd.Kind == CmdAttack {
+		t.intents[cmd.UnitID] = cmd
+		return
+	}
+	delete(t.intents, cmd.UnitID)
+}
+
+func (t *Ticker) resolveMovement(cmds []Command) {
+	moveCmds := make(map[entity.EntityID]Command)
+	remaining := make(map[entity.EntityID]int)
+	maxSteps := 0
+
+	for _, cmd := range cmds {
+		switch cmd.Kind {
+		case CmdMoveFast, CmdMoveGuard:
+			if cmd.TargetCoord == nil {
+				continue
+			}
+			u := t.world.GetUnit(cmd.UnitID)
+			if u == nil {
+				continue
+			}
+			speed := u.Stats().SpeedFast
+			if cmd.Kind == CmdMoveGuard {
+				speed = u.Stats().SpeedGuard
+			}
+			moveCmds[cmd.UnitID] = cmd
+			remaining[cmd.UnitID] = speed
+			if speed > maxSteps {
+				maxSteps = speed
+			}
 		}
-		u := t.world.GetUnit(cmd.UnitID)
-		if u == nil {
-			return
+	}
+
+	stopped := make(map[entity.EntityID]bool)
+	for step := 0; step < maxSteps; step++ {
+		proposals := make(map[hex.Coord][]entity.EntityID)
+		destByUnit := make(map[entity.EntityID]hex.Coord)
+
+		for unitID, cmd := range moveCmds {
+			if stopped[unitID] || remaining[unitID] <= 0 {
+				continue
+			}
+			next, ok := t.world.PreviewMoveStep(unitID, *cmd.TargetCoord)
+			if !ok {
+				stopped[unitID] = true
+				continue
+			}
+			proposals[next] = append(proposals[next], unitID)
+			destByUnit[unitID] = next
 		}
-		speed := u.Stats().SpeedFast
-		if cmd.Kind == CmdMoveGuard {
-			speed = u.Stats().SpeedGuard
+
+		accepted := make(map[entity.EntityID]hex.Coord)
+		for dest, unitIDs := range proposals {
+			if len(unitIDs) != 1 {
+				for _, unitID := range unitIDs {
+					stopped[unitID] = true
+				}
+				continue
+			}
+			accepted[unitIDs[0]] = dest
 		}
-		t.world.MoveUnitToward(cmd.UnitID, *cmd.TargetCoord, speed)
-	case CmdGather:
-		t.world.GatherAtCurrentTile(cmd.UnitID)
-	case CmdBuild:
-		if cmd.TargetCoord == nil || cmd.BuildingKind == nil {
-			return
+
+		if len(accepted) == 0 {
+			break
 		}
-		kind, ok := entity.ParseBuildingKind(*cmd.BuildingKind)
-		if !ok {
-			return
+
+		t.world.ApplyUnitMoves(accepted)
+		for unitID := range accepted {
+			remaining[unitID]--
+			if remaining[unitID] <= 0 || destByUnit[unitID] == *moveCmds[unitID].TargetCoord {
+				stopped[unitID] = true
+			}
 		}
-		t.world.BuildStructure(cmd.UnitID, kind, *cmd.TargetCoord)
-	case CmdAttack:
+	}
+}
+
+func (t *Ticker) resolveCombat(cmds []Command) {
+	damage := make(map[entity.EntityID]int)
+	for unitID, cmd := range t.intents {
 		if cmd.TargetID == nil {
-			return
+			delete(t.intents, unitID)
+			continue
 		}
-		t.world.AttackTarget(cmd.UnitID, *cmd.TargetID)
-	case CmdProduce:
-		if cmd.BuildingID == nil || cmd.UnitKind == nil {
-			return
+		attacker := t.world.GetUnit(unitID)
+		if attacker == nil {
+			delete(t.intents, unitID)
+			continue
 		}
-		kind, ok := entity.ParseUnitKind(*cmd.UnitKind)
-		if !ok {
-			return
+		if amount, ok := t.world.PreviewAttackDamage(unitID, *cmd.TargetID); ok {
+			damage[*cmd.TargetID] += amount
+			continue
 		}
-		t.world.EnqueueProduction(*cmd.BuildingID, kind)
+		if t.world.GetUnit(*cmd.TargetID) == nil && t.world.GetBuilding(*cmd.TargetID) == nil {
+			delete(t.intents, unitID)
+		}
+	}
+
+	for _, cmd := range cmds {
+		if cmd.Kind != CmdMoveGuard {
+			continue
+		}
+		if targetID, ok := t.world.FindAutoAttackTarget(cmd.UnitID); ok {
+			if amount, ok := t.world.PreviewAttackDamage(cmd.UnitID, targetID); ok {
+				damage[targetID] += amount
+			}
+		}
+	}
+
+	if len(damage) > 0 {
+		t.world.ApplyDamage(damage)
+	}
+}
+
+func (t *Ticker) resolveEconomy(cmds []Command) {
+	for _, cmd := range cmds {
+		switch cmd.Kind {
+		case CmdGather:
+			t.world.GatherAtCurrentTile(cmd.UnitID)
+		case CmdBuild:
+			if cmd.TargetCoord == nil || cmd.BuildingKind == nil {
+				continue
+			}
+			kind, ok := entity.ParseBuildingKind(*cmd.BuildingKind)
+			if !ok {
+				continue
+			}
+			t.world.BuildStructure(cmd.UnitID, kind, *cmd.TargetCoord)
+		case CmdProduce:
+			if cmd.BuildingID == nil || cmd.UnitKind == nil {
+				continue
+			}
+			kind, ok := entity.ParseUnitKind(*cmd.UnitKind)
+			if !ok {
+				continue
+			}
+			t.world.EnqueueProduction(*cmd.BuildingID, kind)
+		}
 	}
 }

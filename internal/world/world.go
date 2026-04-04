@@ -28,21 +28,23 @@ var StartingResources = Resources{
 
 // World holds all mutable game state. All fields are protected by mu.
 type World struct {
-	mu        sync.RWMutex
-	Tiles     map[hex.Coord]terrain.Tile
-	Units     map[entity.EntityID]*entity.Unit
-	Buildings map[entity.EntityID]*entity.Building
-	TeamRes   map[entity.Team]Resources
-	Tick      uint64
-	idCounter atomic.Uint64
+	mu                sync.RWMutex
+	Tiles             map[hex.Coord]terrain.Tile
+	ResourceRemaining map[hex.Coord]int
+	Units             map[entity.EntityID]*entity.Unit
+	Buildings         map[entity.EntityID]*entity.Building
+	TeamRes           map[entity.Team]Resources
+	Tick              uint64
+	idCounter         atomic.Uint64
 }
 
 // NewWorld creates and seeds a new world using the given seed.
 func NewWorld(seed int64) *World {
 	w := &World{
-		Tiles:     make(map[hex.Coord]terrain.Tile, hex.GridWidth*hex.GridHeight),
-		Units:     make(map[entity.EntityID]*entity.Unit),
-		Buildings: make(map[entity.EntityID]*entity.Building),
+		Tiles:             make(map[hex.Coord]terrain.Tile, hex.GridWidth*hex.GridHeight),
+		ResourceRemaining: make(map[hex.Coord]int),
+		Units:             make(map[entity.EntityID]*entity.Unit),
+		Buildings:         make(map[entity.EntityID]*entity.Building),
 		TeamRes: map[entity.Team]Resources{
 			entity.Team1: StartingResources,
 			entity.Team2: StartingResources,
@@ -58,6 +60,13 @@ func (w *World) Tile(c hex.Coord) (terrain.Tile, bool) {
 	defer w.mu.RUnlock()
 	t, ok := w.Tiles[c]
 	return t, ok
+}
+
+// ResourceAt returns the remaining resource on a tile, or 0 if none.
+func (w *World) ResourceAt(c hex.Coord) int {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.ResourceRemaining[c]
 }
 
 // AllTiles returns a stable-ordered slice of all tiles (sorted by Q*GridHeight+R).
@@ -147,7 +156,7 @@ func (w *World) losCircle(team entity.Team) map[hex.Coord]bool {
 		}
 	}
 	for _, b := range w.Buildings {
-		if b.Team() != team || !b.IsAlive() {
+		if b.Team() != team || !b.IsAlive() || !b.IsComplete() {
 			continue
 		}
 		// Buildings have a fixed LOS of 3.

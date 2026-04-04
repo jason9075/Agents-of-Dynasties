@@ -38,12 +38,8 @@ The following are not fully implemented yet:
 
 - Formation or stance logic
 - Advanced pathfinding
-- Carry-and-return economy loops for villagers
-- Finite map resource depletion
-- Construction time / build progress
-- Production time per unit
 
-Important: the current implementation already applies movement, combat, gathering, building, and production in the ticker. Some systems are still simplified. For example, villagers currently gather directly into the team stockpile instead of carrying resources back to a drop-off building.
+Important: the current implementation already applies movement, combat, gathering, building, and production in the ticker. Some systems are still simplified. Villagers now carry resources and must deposit them beside a friendly `town_center`, but there is still no richer worker automation or advanced pathfinding.
 
 ## Unit Roster
 
@@ -62,7 +58,8 @@ Important: the current implementation already applies movement, combat, gatherin
 #### Villager Special Abilities
 
 - Can gather map resources
-- Gathered resources currently go directly into the team stockpile
+- Gathered resources are carried by the villager first
+- Carried resources are deposited when the villager uses `GATHER` while adjacent to a friendly `town_center`
 - Can construct buildings
 - Is the main unit used to expand early-game economy and infrastructure
 - Should be protected by military units rather than used as a frontline fighter
@@ -222,6 +219,14 @@ This separation is important because the game loop depends on villagers to turn 
   - `stable` produces `scout_cavalry` and `paladin`
   - `archery_range` produces `archer`
 - Production is queue-based, and each building spawns at most one queued unit per tick
+- `barracks`, `stable`, and `archery_range` currently take `2` ticks to complete construction
+- Unit production time:
+  - `villager`: `1` tick
+  - `infantry`: `1` tick
+  - `spearman`: `1` tick
+  - `archer`: `1` tick
+  - `scout_cavalry`: `2` ticks
+  - `paladin`: `2` ticks
 
 ## Vision Notes
 
@@ -233,8 +238,8 @@ This separation is important because the game loop depends on villagers to turn 
 
 The values in this document currently come from:
 
+- `internal/entity/catalog.go`
 - `internal/entity/unit.go`
-- `internal/entity/rules.go`
 - `internal/ticker/ticker.go`
 - `internal/world/actions.go`
 

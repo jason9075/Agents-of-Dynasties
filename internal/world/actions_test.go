@@ -8,27 +8,68 @@ import (
 	"github.com/jason9075/agents_of_dynasties/internal/terrain"
 )
 
-func TestGatherAtCurrentTile_VillagerAddsResources(t *testing.T) {
+func TestGatherAtCurrentTile_VillagerCarriesThenDepositsResources(t *testing.T) {
 	w := NewWorld(42)
 	villager := w.UnitsByTeam(entity.Team1)[0]
 	start := w.GetResources(entity.Team1)
+	tc := mustTownCenterPos(t, w, entity.Team1)
 
 	w.WriteFunc(func() {
 		villager.SetPosition(hex.Coord{Q: 3, R: 8})
 		w.Tiles[hex.Coord{Q: 3, R: 8}] = terrain.Tile{Coord: hex.Coord{Q: 3, R: 8}, Terrain: terrain.GoldMine}
+		w.ResourceRemaining[hex.Coord{Q: 3, R: 8}] = 15
 	})
 
 	if !w.GatherAtCurrentTile(villager.ID()) {
 		t.Fatalf("expected villager gather to succeed")
 	}
+	if villager.CarryType() != terrain.ResourceGold || villager.CarryAmount() != 12 {
+		t.Fatalf("carry = (%q, %d), want (%q, %d)", villager.CarryType(), villager.CarryAmount(), terrain.ResourceGold, 12)
+	}
+
+	w.WriteFunc(func() {
+		villager.SetPosition(hex.Coord{Q: tc.Q + 1, R: tc.R})
+	})
+	if !w.GatherAtCurrentTile(villager.ID()) {
+		t.Fatalf("expected villager deposit to succeed")
+	}
 
 	after := w.GetResources(entity.Team1)
-	if after.Gold != start.Gold+20 {
-		t.Fatalf("gold = %d, want %d", after.Gold, start.Gold+20)
+	if after.Gold != start.Gold+12 {
+		t.Fatalf("gold = %d, want %d", after.Gold, start.Gold+12)
+	}
+	if villager.CarryAmount() != 0 {
+		t.Fatalf("expected carry to clear after deposit")
 	}
 }
 
-func TestBuildStructure_VillagerBuildsBarracks(t *testing.T) {
+func TestGatherAtCurrentTile_DepletesResourceTile(t *testing.T) {
+	w := NewWorld(42)
+	villager := w.UnitsByTeam(entity.Team1)[0]
+	pos := hex.Coord{Q: 3, R: 8}
+
+	w.WriteFunc(func() {
+		villager.SetPosition(pos)
+		w.Tiles[pos] = terrain.Tile{Coord: pos, Terrain: terrain.Deer}
+		w.ResourceRemaining[pos] = 40
+	})
+
+	if !w.GatherAtCurrentTile(villager.ID()) {
+		t.Fatalf("expected gather to succeed")
+	}
+	w.WriteFunc(func() {
+		villager.ClearCarry()
+	})
+	if !w.GatherAtCurrentTile(villager.ID()) {
+		t.Fatalf("expected second gather to succeed")
+	}
+	tile, _ := w.Tile(pos)
+	if tile.Terrain != terrain.Plain {
+		t.Fatalf("expected depleted tile to become plain, got %v", tile.Terrain)
+	}
+}
+
+func TestBuildStructure_VillagerStartsBarracksConstruction(t *testing.T) {
 	w := NewWorld(42)
 	villager := w.UnitsByTeam(entity.Team1)[0]
 	target := hex.Coord{Q: 6, R: 5}
@@ -47,6 +88,9 @@ func TestBuildStructure_VillagerBuildsBarracks(t *testing.T) {
 	for _, b := range w.BuildingsByTeam(entity.Team1) {
 		if b.Kind() == entity.KindBarracks && b.Position() == target {
 			found = true
+			if b.IsComplete() {
+				t.Fatalf("expected new barracks to start under construction")
+			}
 		}
 	}
 	if !found {
@@ -54,8 +98,40 @@ func TestBuildStructure_VillagerBuildsBarracks(t *testing.T) {
 	}
 
 	after := w.GetResources(entity.Team1)
-	if after.Wood != start.Wood-entity.BuildingCosts[entity.KindBarracks].Wood {
-		t.Fatalf("wood = %d, want %d", after.Wood, start.Wood-entity.BuildingCosts[entity.KindBarracks].Wood)
+	if after.Wood != start.Wood-entity.BuildingCost(entity.KindBarracks).Wood {
+		t.Fatalf("wood = %d, want %d", after.Wood, start.Wood-entity.BuildingCost(entity.KindBarracks).Wood)
+	}
+}
+
+func TestProcessConstruction_CompletesBuildingAfterTicks(t *testing.T) {
+	w := NewWorld(42)
+	villager := w.UnitsByTeam(entity.Team1)[0]
+	target := hex.Coord{Q: 6, R: 5}
+
+	w.WriteFunc(func() {
+		villager.SetPosition(hex.Coord{Q: 5, R: 5})
+		w.Tiles[target] = terrain.Tile{Coord: target, Terrain: terrain.Plain}
+	})
+	if !w.BuildStructure(villager.ID(), entity.KindBarracks, target) {
+		t.Fatalf("expected build start to succeed")
+	}
+
+	var barracks *entity.Building
+	for _, b := range w.BuildingsByTeam(entity.Team1) {
+		if b.Kind() == entity.KindBarracks && b.Position() == target {
+			barracks = b
+		}
+	}
+	if barracks == nil {
+		t.Fatalf("missing barracks")
+	}
+	w.ProcessConstruction()
+	if barracks.IsComplete() {
+		t.Fatalf("barracks should still be under construction after 1 tick")
+	}
+	w.ProcessConstruction()
+	if !barracks.IsComplete() {
+		t.Fatalf("barracks should be complete after 2 ticks")
 	}
 }
 
@@ -69,7 +145,7 @@ func TestAttackTarget_SpearmanCountersPaladin(t *testing.T) {
 	}
 
 	got := w.GetUnit(target.ID()).HP()
-	want := entity.DefaultStats[entity.KindPaladin].MaxHP - (entity.DefaultStats[entity.KindSpearman].Attack + 8 - entity.DefaultStats[entity.KindPaladin].Defense)
+	want := entity.UnitSpecs[entity.KindPaladin].Stats.MaxHP - (entity.UnitSpecs[entity.KindSpearman].Stats.Attack + 8 - entity.UnitSpecs[entity.KindPaladin].Stats.Defense)
 	if got != want {
 		t.Fatalf("paladin hp = %d, want %d", got, want)
 	}
@@ -93,8 +169,27 @@ func TestEnqueueProduction_AndProcessProduction(t *testing.T) {
 	}
 
 	after := w.GetResources(entity.Team1)
-	cost := entity.UnitCosts[entity.KindInfantry]
+	cost := entity.UnitCost(entity.KindInfantry)
 	if after.Food != start.Food-cost.Food || after.Gold != start.Gold-cost.Gold {
 		t.Fatalf("resources after production = %+v, want food=%d gold=%d", after, start.Food-cost.Food, start.Gold-cost.Gold)
+	}
+}
+
+func TestEnqueueProduction_RespectsMultiTickTraining(t *testing.T) {
+	w := NewWorld(42)
+	stable := w.SpawnBuilding(entity.Team1, entity.KindStable, hex.Coord{Q: 8, R: 7})
+	startUnits := len(w.UnitsByTeam(entity.Team1))
+
+	if !w.EnqueueProduction(stable.ID(), entity.KindPaladin) {
+		t.Fatalf("expected enqueue to succeed")
+	}
+
+	w.ProcessProduction()
+	if len(w.UnitsByTeam(entity.Team1)) != startUnits {
+		t.Fatalf("paladin should not spawn on first production tick")
+	}
+	w.ProcessProduction()
+	if len(w.UnitsByTeam(entity.Team1)) != startUnits+1 {
+		t.Fatalf("paladin should spawn on second production tick")
 	}
 }

@@ -10,9 +10,9 @@ import (
 )
 
 type clusterSpec struct {
-	kind    terrain.Type
-	count   int
-	radius  int
+	kind   terrain.Type
+	count  int
+	radius int
 }
 
 var clusters = []clusterSpec{
@@ -88,6 +88,8 @@ func generate(w *World, seed int64) {
 	tc2 := entity.NewBuilding(w.nextID(), entity.Team2, entity.KindTownCenter, tc2Pos)
 	w.addBuilding(tc2)
 	spawnStartingVillagers(w, entity.Team2, tc2Pos, 2)
+
+	initializeResourceNodes(w)
 }
 
 func clearAndReserveArea(w *World, reserved map[hex.Coord]bool, center hex.Coord, radius int) {
@@ -279,5 +281,15 @@ func randomCoord(rng *rand.Rand) hex.Coord {
 	return hex.Coord{
 		Q: rng.Intn(hex.GridWidth),
 		R: rng.Intn(hex.GridHeight),
+	}
+}
+
+func initializeResourceNodes(w *World) {
+	for coord, tile := range w.Tiles {
+		if cap := entity.ResourceCapacity(tile.Terrain); cap > 0 {
+			w.ResourceRemaining[coord] = cap
+			continue
+		}
+		delete(w.ResourceRemaining, coord)
 	}
 }
