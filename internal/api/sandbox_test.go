@@ -31,14 +31,14 @@ func TestSandboxPresetsHandler_ReturnsPresetSummary(t *testing.T) {
 		t.Fatalf("expected at least one preset")
 	}
 
-	preset := resp.Presets[0]
-	if preset.ID != "villager_move_then_build" {
-		t.Fatalf("preset id = %q, want %q", preset.ID, "villager_move_then_build")
+	preset := findPresetSummary(resp.Presets, "gather_four_corners")
+	if preset == nil {
+		t.Fatalf("expected gather_four_corners preset, got %+v", resp.Presets)
 	}
-	if preset.MaxTick != 6 {
-		t.Fatalf("max_tick = %d, want 6", preset.MaxTick)
+	if preset.MaxTick != 18 {
+		t.Fatalf("max_tick = %d, want 18", preset.MaxTick)
 	}
-	if len(preset.Actors) != 1 || preset.Actors[0].ID != "villager_1" {
+	if len(preset.Actors) != 4 {
 		t.Fatalf("unexpected actors: %+v", preset.Actors)
 	}
 	if len(preset.DefaultTimeline) != 4 {
@@ -71,26 +71,26 @@ func TestSandboxSimulateHandler_DefaultPresetReplaysLiveServerLogic(t *testing.T
 	}
 
 	assertUnitPos(t, resp.Snapshots[0], 1001, 2, 2)
-	assertUnitPos(t, resp.Snapshots[1], 1001, 3, 2)
-	assertUnitPos(t, resp.Snapshots[2], 1001, 4, 2)
+	assertUnitPos(t, resp.Snapshots[1], 1001, 4, 2)
+	assertUnitPos(t, resp.Snapshots[2], 1001, 5, 2)
 	assertUnitPos(t, resp.Snapshots[3], 1001, 5, 2)
 
-	tick4Barracks := findBuilding(resp.Snapshots[4].Team1.Buildings, "barracks", 6, 2)
-	if tick4Barracks == nil {
-		t.Fatalf("expected barracks on tick 4, buildings=%+v", resp.Snapshots[4].Team1.Buildings)
+	tick2Barracks := findBuilding(resp.Snapshots[2].Team1.Buildings, "barracks", 6, 2)
+	if tick2Barracks == nil {
+		t.Fatalf("expected barracks on tick 2, buildings=%+v", resp.Snapshots[2].Team1.Buildings)
 	}
-	if tick4Barracks.Complete {
-		t.Fatalf("expected barracks to still be under construction on tick 4")
+	if tick2Barracks.Complete {
+		t.Fatalf("expected barracks to still be under construction on tick 2")
 	}
-	if tick4Barracks.BuildProgress != 1 || tick4Barracks.BuildTicksTotal != 2 {
-		t.Fatalf("unexpected barracks construction state on tick 4: %+v", *tick4Barracks)
+	if tick2Barracks.BuildProgress != 1 || tick2Barracks.BuildTicksTotal != 2 {
+		t.Fatalf("unexpected barracks construction state on tick 2: %+v", *tick2Barracks)
 	}
 
-	tick5Barracks := findBuilding(resp.Snapshots[5].Team1.Buildings, "barracks", 6, 2)
-	if tick5Barracks == nil || !tick5Barracks.Complete {
-		t.Fatalf("expected barracks to complete on tick 5, buildings=%+v", resp.Snapshots[5].Team1.Buildings)
+	tick3Barracks := findBuilding(resp.Snapshots[3].Team1.Buildings, "barracks", 6, 2)
+	if tick3Barracks == nil || !tick3Barracks.Complete {
+		t.Fatalf("expected barracks to complete on tick 3, buildings=%+v", resp.Snapshots[3].Team1.Buildings)
 	}
-	if got := resp.Snapshots[4].Team1.Resources; got.Wood != 80 || got.Stone != 40 || got.Food != 200 || got.Gold != 100 {
+	if got := resp.Snapshots[2].Team1.Resources; got.Wood != 80 || got.Stone != 40 || got.Food != 200 || got.Gold != 100 {
 		t.Fatalf("unexpected resources after build payment: %+v", got)
 	}
 }
@@ -198,6 +198,77 @@ func TestSandboxSimulateHandler_AllowsExtendedSimulationBeyondPresetMaxTick(t *t
 	}
 }
 
+func TestSandboxSimulateHandler_ExposesUnitStatusInSnapshots(t *testing.T) {
+	h := &sandboxSimulateHandler{}
+	reqBody := sandboxSimulationRequest{PresetID: "villager_move_then_build"}
+
+	rec := doSandboxRequest(t, http.MethodPost, "/sandbox/simulate", reqBody, h)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var resp sandboxSimulationResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal sandbox simulate response: %v", err)
+	}
+
+	unitAtTick2 := findUnit(resp.Snapshots[2].Team1.Units, 1001)
+	if unitAtTick2 == nil {
+		t.Fatalf("expected unit on tick 2, units=%+v", resp.Snapshots[2].Team1.Units)
+	}
+	if unitAtTick2.Status != string(entity.StatusBuilding) {
+		t.Fatalf("status = %q, want %q", unitAtTick2.Status, entity.StatusBuilding)
+	}
+
+	unitAtTick3 := findUnit(resp.Snapshots[3].Team1.Units, 1001)
+	if unitAtTick3 == nil {
+		t.Fatalf("expected unit on tick 3, units=%+v", resp.Snapshots[3].Team1.Units)
+	}
+	if unitAtTick3.Status != string(entity.StatusIdle) {
+		t.Fatalf("status = %q, want %q", unitAtTick3.Status, entity.StatusIdle)
+	}
+}
+
+func TestSandboxSimulateHandler_GatherFourCornersStartsPersistentGathering(t *testing.T) {
+	h := &sandboxSimulateHandler{}
+	reqBody := sandboxSimulationRequest{PresetID: "gather_four_corners"}
+
+	rec := doSandboxRequest(t, http.MethodPost, "/sandbox/simulate", reqBody, h)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var resp sandboxSimulationResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal sandbox simulate response: %v", err)
+	}
+
+	if resp.Map.Width != 9 || resp.Map.Height != 9 {
+		t.Fatalf("unexpected sandbox map: %+v", resp.Map)
+	}
+
+	tick1 := resp.Snapshots[1]
+	starts := map[entity.EntityID]coordView{
+		1101: {Q: 3, R: 4},
+		1102: {Q: 4, R: 3},
+		1103: {Q: 4, R: 5},
+		1104: {Q: 5, R: 4},
+	}
+	for _, id := range []entity.EntityID{1101, 1102, 1103, 1104} {
+		unit := findUnit(tick1.Team1.Units, id)
+		if unit == nil {
+			t.Fatalf("missing unit %d on tick 1", id)
+		}
+		if unit.Status != string(entity.StatusGathering) {
+			t.Fatalf("unit %d status = %q, want %q", id, unit.Status, entity.StatusGathering)
+		}
+		start := starts[id]
+		if unit.Position == start {
+			t.Fatalf("unit %d did not leave its start tile: %+v", id, unit.Position)
+		}
+	}
+}
+
 func doSandboxRequest(t *testing.T, method, path string, body any, h http.Handler) *httptest.ResponseRecorder {
 	t.Helper()
 
@@ -234,6 +305,26 @@ func findBuilding(buildings []buildingView, kind string, q, r int) *buildingView
 		if building.Kind == kind && building.Position.Q == q && building.Position.R == r {
 			copyBuilding := building
 			return &copyBuilding
+		}
+	}
+	return nil
+}
+
+func findUnit(units []unitView, id entity.EntityID) *unitView {
+	for _, unit := range units {
+		if unit.ID == id {
+			copyUnit := unit
+			return &copyUnit
+		}
+	}
+	return nil
+}
+
+func findPresetSummary(presets []sandboxPresetSummary, id string) *sandboxPresetSummary {
+	for _, preset := range presets {
+		if preset.ID == id {
+			copyPreset := preset
+			return &copyPreset
 		}
 	}
 	return nil

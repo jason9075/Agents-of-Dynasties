@@ -116,6 +116,7 @@ type sandboxActorRef struct {
 }
 
 var sandboxPresetRegistry = map[string]sandboxPresetDefinition{
+	"gather_four_corners":      newGatherFourCornersPreset(),
 	"villager_move_then_build": newVillagerMoveThenBuildPreset(),
 }
 
@@ -205,14 +206,13 @@ func newVillagerMoveThenBuildPreset() sandboxPresetDefinition {
 	tiles[hex.Coord{Q: 7, R: 4}] = terrain.Mountain
 	tiles[hex.Coord{Q: 7, R: 5}] = terrain.Mountain
 
-	moveTarget := coordView{Q: 5, R: 2}
 	buildTarget := coordView{Q: 6, R: 2}
 	buildingKind := entity.KindBarracks.String()
 
 	return sandboxPresetDefinition{
 		ID:               "villager_move_then_build",
 		Name:             "Villager move then build",
-		Description:      "Uses live server movement and building logic: the villager receives MOVE_GUARD on ticks 1-3, then starts constructing a barracks on tick 4.",
+		Description:      "Uses one persistent BUILD command: the villager keeps moving toward the build site across later ticks, then starts construction and finishes the barracks.",
 		Width:            8,
 		Height:           6,
 		DefaultPlaybackM: 800,
@@ -243,33 +243,119 @@ func newVillagerMoveThenBuildPreset() sandboxPresetDefinition {
 		},
 		DefaultTimeline: []sandboxTimelineRow{
 			{
-				RowID:       "move_1",
+				RowID:        "build_1",
 				Tick:        1,
 				ActorID:     "villager_1",
-				Kind:        ticker.CmdMoveGuard,
-				TargetCoord: &moveTarget,
-			},
-			{
-				RowID:       "move_2",
-				Tick:        2,
-				ActorID:     "villager_1",
-				Kind:        ticker.CmdMoveGuard,
-				TargetCoord: &moveTarget,
-			},
-			{
-				RowID:       "move_3",
-				Tick:        3,
-				ActorID:     "villager_1",
-				Kind:        ticker.CmdMoveGuard,
-				TargetCoord: &moveTarget,
-			},
-			{
-				RowID:        "build_1",
-				Tick:         4,
-				ActorID:      "villager_1",
 				Kind:         ticker.CmdBuild,
 				TargetCoord:  &buildTarget,
 				BuildingKind: &buildingKind,
+			},
+		},
+	}
+}
+
+func newGatherFourCornersPreset() sandboxPresetDefinition {
+	tiles := make(map[hex.Coord]terrain.Type)
+	for q := 0; q < 9; q++ {
+		for r := 0; r < 9; r++ {
+			tiles[hex.Coord{Q: q, R: r}] = terrain.Plain
+		}
+	}
+
+	tiles[hex.Coord{Q: 0, R: 0}] = terrain.Deer
+	tiles[hex.Coord{Q: 8, R: 0}] = terrain.Forest
+	tiles[hex.Coord{Q: 0, R: 8}] = terrain.GoldMine
+	tiles[hex.Coord{Q: 8, R: 8}] = terrain.StoneMine
+
+	deerTarget := coordView{Q: 0, R: 0}
+	forestTarget := coordView{Q: 8, R: 0}
+	goldTarget := coordView{Q: 0, R: 8}
+	stoneTarget := coordView{Q: 8, R: 8}
+
+	return sandboxPresetDefinition{
+		ID:               "gather_four_corners",
+		Name:             "Gather from four corners",
+		Description:      "A single Town Center anchors the middle of the map while four villagers each receive one persistent GATHER command toward deer, forest, gold mine, and stone mine in the corners.",
+		Width:            9,
+		Height:           9,
+		DefaultPlaybackM: 800,
+		MaxTick:          18,
+		Tiles:            tiles,
+		TeamResources: map[entity.Team]world.Resources{
+			entity.Team1: {Food: 0, Wood: 0, Gold: 0, Stone: 0},
+			entity.Team2: {Food: 0, Wood: 0, Gold: 0, Stone: 0},
+		},
+		Units: []sandboxUnitSeed{
+			{
+				ActorID:  "villager_deer",
+				Label:    "villager_deer",
+				EntityID: 1101,
+				Team:     entity.Team1,
+				Kind:     entity.KindVillager,
+				Position: hex.Coord{Q: 3, R: 4},
+			},
+			{
+				ActorID:  "villager_forest",
+				Label:    "villager_forest",
+				EntityID: 1102,
+				Team:     entity.Team1,
+				Kind:     entity.KindVillager,
+				Position: hex.Coord{Q: 4, R: 3},
+			},
+			{
+				ActorID:  "villager_gold",
+				Label:    "villager_gold",
+				EntityID: 1103,
+				Team:     entity.Team1,
+				Kind:     entity.KindVillager,
+				Position: hex.Coord{Q: 4, R: 5},
+			},
+			{
+				ActorID:  "villager_stone",
+				Label:    "villager_stone",
+				EntityID: 1104,
+				Team:     entity.Team1,
+				Kind:     entity.KindVillager,
+				Position: hex.Coord{Q: 5, R: 4},
+			},
+		},
+		Buildings: []sandboxBuildingSeed{
+			{
+				EntityID: 2101,
+				Team:     entity.Team1,
+				Kind:     entity.KindTownCenter,
+				Position: hex.Coord{Q: 4, R: 4},
+				Complete: true,
+			},
+		},
+		DefaultTimeline: []sandboxTimelineRow{
+			{
+				RowID:       "gather_deer",
+				Tick:        1,
+				ActorID:     "villager_deer",
+				Kind:        ticker.CmdGather,
+				TargetCoord: &deerTarget,
+			},
+			{
+				RowID:       "gather_forest",
+				Tick:        1,
+				ActorID:     "villager_forest",
+				Kind:        ticker.CmdGather,
+				TargetCoord: &forestTarget,
+			},
+			{
+				RowID:       "gather_gold",
+				Tick:        1,
+				ActorID:     "villager_gold",
+				Kind:        ticker.CmdGather,
+				TargetCoord: &goldTarget,
+			},
+			{
+				RowID:       "gather_stone",
+				Tick:        1,
+				ActorID:     "villager_stone",
+				Kind:        ticker.CmdGather,
+				TargetCoord: &stoneTarget,
 			},
 		},
 	}
@@ -585,23 +671,7 @@ func snapshotTeamData(w *world.World, team entity.Team) fullStateTeam {
 
 	unitViews := make([]unitView, 0, len(units))
 	for _, u := range units {
-		pos := u.Position()
-		var attackTargetID *entity.EntityID
-		if id, ok := u.AttackTargetID(); ok {
-			attackTargetID = &id
-		}
-		unitViews = append(unitViews, unitView{
-			ID:             u.ID(),
-			Kind:           u.Kind().String(),
-			Team:           u.Team(),
-			Position:       coordView{Q: pos.Q, R: pos.R},
-			HP:             u.HP(),
-			MaxHP:          u.MaxHP(),
-			CarryResource:  string(u.CarryType()),
-			CarryAmount:    u.CarryAmount(),
-			AttackTargetID: attackTargetID,
-			Friendly:       true,
-		})
+		unitViews = append(unitViews, toUnitView(u, true))
 	}
 
 	buildingViews := make([]buildingView, 0, len(buildings))

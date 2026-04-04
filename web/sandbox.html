@@ -260,6 +260,18 @@
         background: rgba(255, 255, 255, 0.04);
       }
 
+      .row-card.dragging {
+        opacity: 0.42;
+      }
+
+      .row-card.drop-before {
+        box-shadow: inset 0 3px 0 rgba(91, 164, 245, 0.9);
+      }
+
+      .row-card.drop-after {
+        box-shadow: inset 0 -3px 0 rgba(91, 164, 245, 0.9);
+      }
+
       .row-card.invalid {
         border-color: rgba(255, 140, 140, 0.32);
         background: rgba(255, 140, 140, 0.08);
@@ -273,9 +285,34 @@
         margin-bottom: 0.8rem;
       }
 
+      .row-top-left {
+        display: flex;
+        align-items: center;
+        gap: 0.65rem;
+        min-width: 0;
+      }
+
       .row-top strong {
         font-size: 0.82rem;
         letter-spacing: 0.04em;
+      }
+
+      .drag-handle {
+        min-height: 30px;
+        min-width: 30px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 10px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(255, 255, 255, 0.04);
+        color: var(--muted);
+        cursor: grab;
+        user-select: none;
+      }
+
+      .drag-handle:active {
+        cursor: grabbing;
       }
 
       .delete-btn {
@@ -681,7 +718,8 @@
       const PAD = HEX_SIZE
       const PRESET_ENDPOINT = '/sandbox/presets'
       const SIMULATE_ENDPOINT = '/sandbox/simulate'
-      const SUPPORTED_COMMANDS = ['MOVE_FAST', 'MOVE_GUARD', 'BUILD']
+      const DEFAULT_PRESET_ID = 'gather_four_corners'
+      const SUPPORTED_COMMANDS = ['MOVE_FAST', 'MOVE_GUARD', 'GATHER', 'BUILD']
       const SUPPORTED_BUILDINGS = ['barracks', 'stable', 'archery_range']
       const AUTO_EXTEND_TICKS = 12
       const AUTO_EXTEND_BUFFER = 3
@@ -762,6 +800,9 @@
       let playbackHandle = null
       let syncHandle = null
       let simulationRequestId = 0
+      let draggingRowId = null
+      let dragDropRowId = null
+      let dragDropPosition = 'before'
       let globalError = ''
 
       function clone(value) {
@@ -863,12 +904,31 @@
         return out
       }
 
-      function sortedRows(rows) {
-        return [...rows].sort((a, b) => {
-          const tickDelta = Number(a.tick) - Number(b.tick)
-          if (tickDelta !== 0) return tickDelta
-          return String(a.rowId).localeCompare(String(b.rowId))
-        })
+      function rowsInEditorOrder() {
+        return [...editorRows]
+      }
+
+      function moveRow(rowId, targetRowId, position) {
+        if (!rowId || !targetRowId || rowId === targetRowId) {
+          return false
+        }
+
+        const fromIndex = editorRows.findIndex((row) => row.rowId === rowId)
+        const targetIndex = editorRows.findIndex((row) => row.rowId === targetRowId)
+        if (fromIndex === -1 || targetIndex === -1) {
+          return false
+        }
+
+        const [row] = editorRows.splice(fromIndex, 1)
+        let insertIndex = targetIndex
+        if (fromIndex < targetIndex) {
+          insertIndex -= 1
+        }
+        if (position === 'after') {
+          insertIndex += 1
+        }
+        editorRows.splice(Math.max(0, insertIndex), 0, row)
+        return true
       }
 
       function highestScheduledTick(rows = editorRows) {
@@ -877,6 +937,30 @@
           highest = Math.max(highest, Number(row.tick) || 0)
         }
         return highest
+      }
+
+      function hasFutureCommandsAfter(tick, rows = editorRows) {
+        return (rows || []).some((row) => Number(row.tick) > tick)
+      }
+
+      function snapshotHasActiveWork(snapshot) {
+        const units = combinedUnits(snapshot)
+        const buildings = combinedBuildings(snapshot)
+        const hasBusyUnit = units.some((unit) => unit.status && unit.status !== 'IDLE')
+        if (hasBusyUnit) {
+          return true
+        }
+        return buildings.some(
+          (building) => !building.complete || building.production_queue_len > 0,
+        )
+      }
+
+      function shouldAutoStopAtTick(tick) {
+        const snapshot = snapshots[tick]
+        if (!snapshot) {
+          return false
+        }
+        return !hasFutureCommandsAfter(tick) && !snapshotHasActiveWork(snapshot)
       }
 
       function editableMaxTick() {
@@ -914,6 +998,9 @@
           return
         }
         setCurrentTick(nextTick)
+        if (shouldAutoStopAtTick(nextTick)) {
+          stopPlayback()
+        }
       }
 
       function queuePlaybackStep() {
@@ -933,6 +1020,9 @@
 
       function startPlayback() {
         stopPlayback()
+        if (shouldAutoStopAtTick(currentTick)) {
+          return
+        }
         playbackHandle = -1
         const button = document.getElementById('play-toggle')
         button.textContent = 'Pause'
@@ -1140,18 +1230,22 @@
       function renderRows() {
         const rowsEl = document.getElementById('rows')
         rowsEl.innerHTML = ''
-        const rows = sortedRows(editorRows)
+        const rows = rowsInEditorOrder()
         const maxTick = editableMaxTick()
 
-        for (const row of rows) {
+        rows.forEach((row, index) => {
           const error = validationByRow[row.rowId]
           const actors = actorChoices()
           const showBuild = row.kind === 'BUILD'
           const card = document.createElement('div')
-          card.className = `row-card${error ? ' invalid' : ''}`
+          card.className = `row-card${error ? ' invalid' : ''}${draggingRowId === row.rowId ? ' dragging' : ''}${dragDropRowId === row.rowId && draggingRowId !== row.rowId && dragDropPosition === 'before' ? ' drop-before' : ''}${dragDropRowId === row.rowId && draggingRowId !== row.rowId && dragDropPosition === 'after' ? ' drop-after' : ''}`
+          card.setAttribute('data-row-card', row.rowId)
           card.innerHTML = `
             <div class="row-top">
-              <strong>Tick ${escapeHtml(String(row.tick))}</strong>
+              <div class="row-top-left">
+                <span class="drag-handle" draggable="true" data-drag-row="${escapeHtml(row.rowId)}" title="Drag to reorder">::</span>
+                <strong>Command ${escapeHtml(String(index + 1))}</strong>
+              </div>
               <button class="delete-btn" data-delete-row="${escapeHtml(row.rowId)}">Delete</button>
             </div>
             <div class="field-grid">
@@ -1199,7 +1293,7 @@
             ${error ? `<div class="row-error">${escapeHtml(error)}</div>` : ''}
           `
           rowsEl.appendChild(card)
-        }
+        })
       }
 
       function renderPresetSummary() {
@@ -1209,9 +1303,9 @@
         document.getElementById('preset-map-meta').textContent =
           `${mapData.width}x${mapData.height} sandbox map`
         document.getElementById('preset-rules-meta').textContent =
-          'Isolated sandbox engine'
+          'Auto-stops when the scenario settles'
         document.getElementById('preset-max-tick-meta').textContent =
-          `0-${simulationMaxTick} simulated ticks`
+          `Buffered through tick ${simulationMaxTick}`
       }
 
       function renderGlobalWarning() {
@@ -1242,7 +1336,7 @@
         slider.value = String(currentTick)
         document.getElementById('tick-label').textContent = String(currentTick)
         document.getElementById('tick-range-label').textContent =
-          `${currentTick} / ${maxTick}`
+          `${currentTick} · buffered to ${maxTick}`
       }
 
       function combinedUnits(snapshot) {
@@ -1450,6 +1544,12 @@
         drawMap(snapshot)
       }
 
+      function clearDragState() {
+        draggingRowId = null
+        dragDropRowId = null
+        dragDropPosition = 'before'
+      }
+
       function bindEvents() {
         AODMapUI.bindCanvasTooltip({
           canvas: document.getElementById('sandbox-canvas'),
@@ -1511,6 +1611,48 @@
           if (!rowId) return
           deleteRow(rowId)
         })
+
+        document.getElementById('rows').addEventListener('dragstart', (event) => {
+          const rowId = event.target.getAttribute('data-drag-row')
+          if (!rowId) return
+          draggingRowId = rowId
+          dragDropRowId = null
+          dragDropPosition = 'before'
+          if (event.dataTransfer) {
+            event.dataTransfer.effectAllowed = 'move'
+            event.dataTransfer.setData('text/plain', rowId)
+          }
+          renderRows()
+        })
+
+        document.getElementById('rows').addEventListener('dragover', (event) => {
+          if (!draggingRowId) return
+          const card = event.target.closest('[data-row-card]')
+          if (!card) return
+          const targetRowId = card.getAttribute('data-row-card')
+          if (!targetRowId || targetRowId === draggingRowId) return
+          event.preventDefault()
+          const rect = card.getBoundingClientRect()
+          dragDropRowId = targetRowId
+          dragDropPosition = event.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
+          renderRows()
+        })
+
+        document.getElementById('rows').addEventListener('drop', (event) => {
+          if (!draggingRowId || !dragDropRowId) return
+          event.preventDefault()
+          stopPlayback()
+          if (moveRow(draggingRowId, dragDropRowId, dragDropPosition)) {
+            scheduleSimulation()
+          }
+          clearDragState()
+          renderRows()
+        })
+
+        document.getElementById('rows').addEventListener('dragend', () => {
+          clearDragState()
+          renderRows()
+        })
       }
 
       async function init() {
@@ -1537,7 +1679,12 @@
             return
           }
 
-          await loadPreset(select.value || presetList[0].id)
+          const defaultPresetId =
+            presetList.find((preset) => preset.id === DEFAULT_PRESET_ID)?.id ||
+            select.value ||
+            presetList[0].id
+          select.value = defaultPresetId
+          await loadPreset(defaultPresetId)
         } catch (error) {
           globalError = error.message
           renderAll()
