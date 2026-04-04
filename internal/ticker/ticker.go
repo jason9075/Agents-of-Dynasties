@@ -38,6 +38,12 @@ func (t *Ticker) Start() {
 	go t.loop()
 }
 
+// Step resolves exactly one game tick synchronously.
+// Useful for tests and server-side sandbox simulations.
+func (t *Ticker) Step() {
+	t.step()
+}
+
 // Stop signals the game loop to exit and waits for it to finish.
 func (t *Ticker) Stop() {
 	close(t.stop)

@@ -152,6 +152,43 @@ Returns current game state filtered by your team's **Line of Sight (LOS)**.
 
 ---
 
+### `GET /commands`
+
+Returns your team's currently pending commands that have been accepted but not yet resolved at the next tick boundary.
+
+This endpoint exists so an agent can avoid re-issuing duplicate or contradictory commands when it polls state multiple times within the same tick.
+
+**Required header:** `X-Team-ID: 1` or `X-Team-ID: 2`
+
+**Response:**
+```json
+{
+  "tick": 5,
+  "commands": [
+    {
+      "team": 1,
+      "unit_id": 2,
+      "kind": "MOVE_GUARD",
+      "target_coord": { "q": 7, "r": 4 }
+    },
+    {
+      "team": 1,
+      "building_id": 1,
+      "kind": "PRODUCE",
+      "unit_kind": "villager"
+    }
+  ]
+}
+```
+
+**Field notes:**
+- `tick` — the current resolved world tick. The listed commands are queued for the next tick boundary after this state.
+- `commands` — only your team's pending commands.
+- pending commands already follow last-command-wins semantics, so each actor appears at most once.
+- this is not command history; once the next tick resolves, the queue is cleared.
+
+---
+
 ### `POST /command`
 
 Submits an action for one of your units. Returns `202 Accepted` immediately; the command is processed at the next tick.
@@ -284,16 +321,22 @@ A minimal loop for an agent to start gathering resources:
    → Read `tick`, `resources`, `population`, and your unit/building list.
    → Identify villager unit IDs.
 
-3. POST /command  (X-Team-ID: 1)
+3. GET /commands  (X-Team-ID: 1)
+   → Check which actors already have pending commands in the current tick window.
+
+4. POST /command  (X-Team-ID: 1)
    Body: { "unit_id": 2, "kind": "GATHER" }
    → 202 Accepted
 
-4. Wait for one tick.
+5. GET /commands  (X-Team-ID: 1)
+   → Verify the new command is now queued, and avoid sending a duplicate for the same actor.
 
-5. GET /state  (X-Team-ID: 1)
+6. Wait for one tick.
+
+7. GET /state  (X-Team-ID: 1)
    → Verify the villager's `carry_amount` changed, or your stockpile increased if it deposited.
 
-6. Repeat from step 2, adjusting strategy based on current state.
+8. Repeat from step 2, adjusting strategy based on current state.
 ```
 
 **Tip:** Always re-read `/state` after each tick before issuing new commands, since enemy positions, your HP, and resource levels will have changed.

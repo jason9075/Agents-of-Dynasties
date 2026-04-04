@@ -159,6 +159,119 @@ func TestCommandHandler_RejectsProduceWhenPopulationCapWouldBeExceeded(t *testin
 	assertErrorResponse(t, rec, http.StatusBadRequest, "population_cap_reached")
 }
 
+func TestCommandsHandler_ReturnsPendingCommandsForTeamOnly(t *testing.T) {
+	w := world.NewWorld(42)
+	q := ticker.NewQueue()
+	h := &commandsHandler{w: w, q: q}
+
+	team1Unit := w.UnitsByTeam(entity.Team1)[0]
+	team2Unit := w.UnitsByTeam(entity.Team2)[0]
+	target := hex.Coord{Q: 7, R: 7}
+
+	q.Submit(ticker.Command{
+		Team:        entity.Team1,
+		UnitID:      team1Unit.ID(),
+		Kind:        ticker.CmdMoveFast,
+		TargetCoord: &target,
+	})
+	q.Submit(ticker.Command{
+		Team:   entity.Team2,
+		UnitID: team2Unit.ID(),
+		Kind:   ticker.CmdGather,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/commands", nil)
+	req.Header.Set("X-Team-ID", "1")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var resp struct {
+		Tick     uint64 `json:"tick"`
+		Commands []struct {
+			Team        entity.Team      `json:"team"`
+			UnitID      *entity.EntityID `json:"unit_id,omitempty"`
+			Kind        string           `json:"kind"`
+			TargetCoord *struct {
+				Q int `json:"q"`
+				R int `json:"r"`
+			} `json:"target_coord,omitempty"`
+		} `json:"commands"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal commands response: %v", err)
+	}
+	if resp.Tick != w.GetTick() {
+		t.Fatalf("tick = %d, want %d", resp.Tick, w.GetTick())
+	}
+	if len(resp.Commands) != 1 {
+		t.Fatalf("commands len = %d, want 1, body=%s", len(resp.Commands), rec.Body.String())
+	}
+	if resp.Commands[0].Team != entity.Team1 || resp.Commands[0].UnitID == nil || *resp.Commands[0].UnitID != team1Unit.ID() || resp.Commands[0].Kind != string(ticker.CmdMoveFast) {
+		t.Fatalf("unexpected command: %+v", resp.Commands[0])
+	}
+	if resp.Commands[0].TargetCoord == nil || resp.Commands[0].TargetCoord.Q != target.Q || resp.Commands[0].TargetCoord.R != target.R {
+		t.Fatalf("unexpected target coord: %+v", resp.Commands[0].TargetCoord)
+	}
+}
+
+func TestCommandsHandler_ReflectsLastCommandWins(t *testing.T) {
+	w := world.NewWorld(42)
+	q := ticker.NewQueue()
+	h := &commandsHandler{w: w, q: q}
+
+	unit := w.UnitsByTeam(entity.Team1)[0]
+	first := hex.Coord{Q: 6, R: 6}
+	second := hex.Coord{Q: 8, R: 8}
+
+	q.Submit(ticker.Command{
+		Team:        entity.Team1,
+		UnitID:      unit.ID(),
+		Kind:        ticker.CmdMoveFast,
+		TargetCoord: &first,
+	})
+	q.Submit(ticker.Command{
+		Team:        entity.Team1,
+		UnitID:      unit.ID(),
+		Kind:        ticker.CmdMoveGuard,
+		TargetCoord: &second,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/commands", nil)
+	req.Header.Set("X-Team-ID", "1")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var resp struct {
+		Commands []struct {
+			Kind        string `json:"kind"`
+			TargetCoord *struct {
+				Q int `json:"q"`
+				R int `json:"r"`
+			} `json:"target_coord,omitempty"`
+		} `json:"commands"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal commands response: %v", err)
+	}
+	if len(resp.Commands) != 1 {
+		t.Fatalf("commands len = %d, want 1, body=%s", len(resp.Commands), rec.Body.String())
+	}
+	if resp.Commands[0].Kind != string(ticker.CmdMoveGuard) {
+		t.Fatalf("kind = %q, want %q", resp.Commands[0].Kind, ticker.CmdMoveGuard)
+	}
+	if resp.Commands[0].TargetCoord == nil || resp.Commands[0].TargetCoord.Q != second.Q || resp.Commands[0].TargetCoord.R != second.R {
+		t.Fatalf("unexpected target coord: %+v", resp.Commands[0].TargetCoord)
+	}
+}
+
 type commandErrorEnvelope struct {
 	Error struct {
 		Code   string `json:"code"`

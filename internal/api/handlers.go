@@ -58,6 +58,17 @@ type coordView struct {
 	R int `json:"r"`
 }
 
+type commandView struct {
+	Team         entity.Team        `json:"team"`
+	UnitID       *entity.EntityID   `json:"unit_id,omitempty"`
+	BuildingID   *entity.EntityID   `json:"building_id,omitempty"`
+	Kind         ticker.CommandKind `json:"kind"`
+	TargetCoord  *coordView         `json:"target_coord,omitempty"`
+	TargetID     *entity.EntityID   `json:"target_id,omitempty"`
+	BuildingKind *string            `json:"building_kind,omitempty"`
+	UnitKind     *string            `json:"unit_kind,omitempty"`
+}
+
 type populationView struct {
 	Used     int `json:"used"`
 	Reserved int `json:"reserved"`
@@ -70,6 +81,11 @@ type stateResponse struct {
 	Population populationView  `json:"population"`
 	Units      []unitView      `json:"units"`
 	Buildings  []buildingView  `json:"buildings"`
+}
+
+type commandsResponse struct {
+	Tick     uint64        `json:"tick"`
+	Commands []commandView `json:"commands"`
 }
 
 // --- Map handler ---
@@ -285,6 +301,42 @@ func (h *fullStateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Tick:  h.w.GetTick(),
 		Team1: teamData(entity.Team1),
 		Team2: teamData(entity.Team2),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+// --- Pending commands handler ---
+
+type commandsHandler struct {
+	w *world.World
+	q *ticker.Queue
+}
+
+func (h *commandsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
+	team, err := teamFromRequest(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_team_header", err.Error())
+		return
+	}
+
+	queued := h.q.Snapshot()
+	commands := make([]commandView, 0, len(queued))
+	for _, cmd := range queued {
+		if cmd.Team != team {
+			continue
+		}
+		commands = append(commands, toCommandView(cmd))
+	}
+
+	resp := commandsResponse{
+		Tick:     h.w.GetTick(),
+		Commands: commands,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -566,5 +618,27 @@ func sameActor(a, b ticker.Command) bool {
 		return a.UnitID == b.UnitID
 	default:
 		return false
+	}
+}
+
+func toCommandView(cmd ticker.Command) commandView {
+	var targetCoord *coordView
+	if cmd.TargetCoord != nil {
+		targetCoord = &coordView{Q: cmd.TargetCoord.Q, R: cmd.TargetCoord.R}
+	}
+	var unitID *entity.EntityID
+	if cmd.BuildingID == nil {
+		id := cmd.UnitID
+		unitID = &id
+	}
+	return commandView{
+		Team:         cmd.Team,
+		UnitID:       unitID,
+		BuildingID:   cmd.BuildingID,
+		Kind:         cmd.Kind,
+		TargetCoord:  targetCoord,
+		TargetID:     cmd.TargetID,
+		BuildingKind: cmd.BuildingKind,
+		UnitKind:     cmd.UnitKind,
 	}
 }
