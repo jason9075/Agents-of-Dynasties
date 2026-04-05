@@ -172,6 +172,11 @@ For `MOVE_GUARD` auto-engagement:
 - if distance is tied, choose the target with the lowest current HP
 - if still tied, choose the lowest entity ID
 
+For `IDLE` counter-attack auto-engagement:
+
+- if a unit in `IDLE` status receives combat damage from an enemy, it automatically targets the attacker and switches into `ATTACK` status
+- this does not apply to units in other states (e.g. `GATHER` or `BUILD` will ignore attacks)
+
 ### Damage Model
 
 Base damage is:

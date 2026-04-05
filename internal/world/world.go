@@ -190,8 +190,18 @@ func (w *World) losCircle(team entity.Team) map[hex.Coord]bool {
 		if u.Team() != team || !u.IsAlive() {
 			continue
 		}
-		for _, c := range hex.Circle(u.Position(), u.Stats().LOS) {
-			visible[c] = true
+		for _, dest := range hex.Circle(u.Position(), u.Stats().LOS) {
+			for _, c := range hex.Linedraw(u.Position(), dest) {
+				if !hex.InBounds(c) {
+					break
+				}
+				visible[c] = true
+				if c != u.Position() {
+					if t, ok := w.Tiles[c]; ok && t.Terrain.BlocksLOS() {
+						break
+					}
+				}
+			}
 		}
 	}
 	for _, b := range w.Buildings {
@@ -199,8 +209,18 @@ func (w *World) losCircle(team entity.Team) map[hex.Coord]bool {
 			continue
 		}
 		// Buildings have a fixed LOS of 3.
-		for _, c := range hex.Circle(b.Position(), 3) {
-			visible[c] = true
+		for _, dest := range hex.Circle(b.Position(), 3) {
+			for _, c := range hex.Linedraw(b.Position(), dest) {
+				if !hex.InBounds(c) {
+					break
+				}
+				visible[c] = true
+				if c != b.Position() {
+					if t, ok := w.Tiles[c]; ok && t.Terrain.BlocksLOS() {
+						break
+					}
+				}
+			}
 		}
 	}
 	return visible

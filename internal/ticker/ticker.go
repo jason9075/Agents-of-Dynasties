@@ -303,6 +303,7 @@ func (t *Ticker) resolveGuardTransitions() {
 
 func (t *Ticker) resolveCombat(extraDamage map[entity.EntityID]int) {
 	damage := make(map[entity.EntityID]int)
+	attackers := make(map[entity.EntityID][]entity.EntityID)
 	for targetID, amount := range extraDamage {
 		damage[targetID] += amount
 	}
@@ -318,6 +319,7 @@ func (t *Ticker) resolveCombat(extraDamage map[entity.EntityID]int) {
 		if amount, ok := t.world.PreviewAttackDamage(u.ID(), targetID); ok {
 			u.SetStatusPhase(entity.PhaseAttacking)
 			damage[targetID] += amount
+			attackers[targetID] = append(attackers[targetID], u.ID())
 			continue
 		}
 		if t.targetExists(targetID) {
@@ -329,6 +331,19 @@ func (t *Ticker) resolveCombat(extraDamage map[entity.EntityID]int) {
 
 	if len(damage) > 0 {
 		t.world.ApplyDamage(damage)
+	}
+
+	for targetID, attList := range attackers {
+		u := t.world.GetUnit(targetID)
+		if u != nil && u.IsAlive() && u.Status() == entity.StatusIdle {
+			for _, attackerID := range attList {
+				if t.targetExists(attackerID) {
+					u.SetAttackStatus(attackerID)
+					u.SetStatusPhase(entity.PhaseClosingToAttack)
+					break
+				}
+			}
+		}
 	}
 }
 

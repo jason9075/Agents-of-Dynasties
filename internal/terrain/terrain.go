@@ -59,6 +59,11 @@ func (t Type) Passable() bool {
 	return t != Lake && t != Mountain
 }
 
+// BlocksLOS reports whether this terrain blocks line of sight.
+func (t Type) BlocksLOS() bool {
+	return t == Mountain || t == Forest
+}
+
 // ResourceYield returns the resource produced when a Villager gathers here.
 func (t Type) ResourceYield() ResourceType {
 	switch t {

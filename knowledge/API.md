@@ -343,6 +343,7 @@ Buildings also provide LOS (radius 3) around their position.
 - **Terrain visibility** (`GET /map`) is always public to both teams.
 - `/map` is public, but resource depletion can still change returned terrain over time.
 - **Enemy units and buildings** only appear in `GET /state` when within the LOS radius of at least one friendly unit or building.
+- **Terrain LOS Blocking**: `mountain` and `forest` terrain types block line-of-sight. Units cannot see past these tiles (but can see the blocking tiles themselves).
 - LOS is recalculated every tick. Enemies that move out of sight disappear from subsequent `/state` responses.
 - Your own units and buildings are **always** visible in `/state`.
 

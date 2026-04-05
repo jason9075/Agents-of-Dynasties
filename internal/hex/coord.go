@@ -1,6 +1,9 @@
 package hex
 
-import "sort"
+import (
+	"math"
+	"sort"
+)
 
 // Coord is an odd-r offset hex coordinate. The grid is 20×15 with 0 ≤ Q < 20, 0 ≤ R < 15.
 type Coord struct {
@@ -117,4 +120,45 @@ func max3(a, b, c int) int {
 		return b
 	}
 	return c
+}
+
+// Linedraw returns coordinates on the line from a to b (inclusive).
+func Linedraw(a, b Coord) []Coord {
+	N := Distance(a, b)
+	if N == 0 {
+		return []Coord{a}
+	}
+	var results []Coord
+	ax, ay, _ := a.cube()
+	bx, by, _ := b.cube()
+
+	for i := 0; i <= N; i++ {
+		t := float64(i) / float64(N)
+		x := float64(ax)*(1-t) + float64(bx)*t + 1e-6
+		y := float64(ay)*(1-t) + float64(by)*t + 2e-6
+		z := -x - y
+		results = append(results, cubeRound(x, y, z))
+	}
+	return results
+}
+
+func cubeRound(fracX, fracY, fracZ float64) Coord {
+	rx := int(math.Round(fracX))
+	ry := int(math.Round(fracY))
+	rz := int(math.Round(fracZ))
+	xDiff := math.Abs(float64(rx) - fracX)
+	yDiff := math.Abs(float64(ry) - fracY)
+	zDiff := math.Abs(float64(rz) - fracZ)
+
+	if xDiff > yDiff && xDiff > zDiff {
+		rx = -ry - rz
+	} else if yDiff > zDiff {
+		ry = -rx - rz
+	} else {
+		rz = -rx - ry
+	}
+
+	q := rx + (rz-(rz&1))/2
+	r := rz
+	return Coord{Q: q, R: r}
 }
