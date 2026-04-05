@@ -170,6 +170,7 @@ Returns current game state filtered by your team's **Line of Sight (LOS)**.
       "build_ticks_total": 2,
       "production_queue_len": 1,
       "production_ticks_remaining": 1,
+      "rally_point_coord": { "q": 5, "r": 5 },
       "friendly": true
     }
   ]
@@ -188,6 +189,7 @@ Returns current game state filtered by your team's **Line of Sight (LOS)**.
 - failed command records include `command_id`, original target fields, `submitted_tick`, `resolved_tick`, and a machine-readable `code`.
 - `units` / `buildings` — mix of friendly (`"friendly": true`) and visible enemy (`"friendly": false`) entities.
 - Enemy entities only appear if they are within the LOS radius of at least one of your units or buildings.
+- `rally_point_coord` — the building's current rally point, designating the preferred tile where newly produced units will spawn.
 
 ---
 
@@ -261,6 +263,7 @@ Submits an action for one of your units. Returns `202 Accepted` immediately with
 | `BUILD`       | `target_coord`, `building_kind`          | Villager persistently moves to the target and keeps building until completion |
 | `PRODUCE`     | `building_id`, `unit_kind`               | Queue a unit in the specified building                    |
 | `CANCEL_PRODUCE`| `building_id`                        | Cancel the most recently queued unit in the building and fully refund its cost and reserved population |
+| `SET_RALLY_POINT`| `building_id`, `target_coord`       | Set the expected priority spawn drop zone for units producing out of this building |
 | `DELETE`      | `unit_id` or `building_id`               | Instantly destroy the target friendly entity (no unit cost refunded, but population is freed). Deleting a building immediately refunds its active queue. |
 | `STOP`        | `unit_id`                                | Clear the unit's current persistent status and return it to `IDLE` |
 

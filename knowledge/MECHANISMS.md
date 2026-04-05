@@ -241,6 +241,8 @@ This means:
 - A building must be complete before it can accept `PRODUCE`.
 - A queued unit reserves population immediately once the enqueue succeeds.
 - Produced units must spawn on a legal adjacent hex.
+- The default priority spawn location is the hex immediately to the building's bottom-right (South-East). If blocked, it finds the nearest valid surrounding hex.
+- The `SET_RALLY_POINT` command can override this target point, causing newly produced units to spawn on a legal adjacent tile closest to the designated rally point coordinate.
 - If no legal adjacent hex is available, the produced unit remains queued and does not appear until a future tick with valid space.
 - Production time is tracked per queued unit kind.
 

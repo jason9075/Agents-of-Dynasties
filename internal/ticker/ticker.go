@@ -133,6 +133,13 @@ func (t *Ticker) applySubmittedCommands(cmds []Command, tick uint64) map[entity.
 			if !t.world.CancelProduction(*cmd.BuildingID) {
 				failures[cmd.Team] = append(failures[cmd.Team], commandFailure(cmd, tick, "cancel_failed", "building queue is empty or building is invalid"))
 			}
+		case CmdSetRallyPoint:
+			if cmd.TargetCoord == nil || cmd.BuildingID == nil {
+				continue
+			}
+			if b := t.world.GetBuilding(*cmd.BuildingID); b != nil {
+				b.SetRallyPoint(*cmd.TargetCoord)
+			}
 		case CmdDelete:
 			var targetID entity.EntityID
 			if cmd.BuildingID != nil {

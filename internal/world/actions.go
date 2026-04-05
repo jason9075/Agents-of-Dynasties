@@ -753,7 +753,7 @@ func (w *World) ProcessProduction() {
 		if !b.AdvanceQueue() {
 			continue
 		}
-		spawn, ok := findFirstOpenSpawnCoord(w, b.Position(), occupied)
+		spawn, ok := findFirstOpenSpawnCoord(w, b, occupied)
 		if !ok {
 			continue
 		}
@@ -934,8 +934,17 @@ func (w *World) CanDepositCarry(unitID entity.EntityID) bool {
 	return isAdjacentToFriendlyTownCenter(w.Buildings, u.Team(), u.Position())
 }
 
-func findFirstOpenSpawnCoord(w *World, origin hex.Coord, occupied map[hex.Coord]bool) (hex.Coord, bool) {
+func findFirstOpenSpawnCoord(w *World, b *entity.Building, occupied map[hex.Coord]bool) (hex.Coord, bool) {
+	origin := b.Position()
+	var rp hex.Coord
+	if b.RallyPoint() != nil {
+		rp = *b.RallyPoint()
+	} else {
+		rp = origin.Neighbors()[5]
+	}
+
 	for radius := 1; radius <= 3; radius++ {
+		var valid []hex.Coord
 		for _, c := range hex.Ring(origin, radius) {
 			if !hex.InBounds(c) || occupied[c] {
 				continue
@@ -944,7 +953,22 @@ func findFirstOpenSpawnCoord(w *World, origin hex.Coord, occupied map[hex.Coord]
 			if !ok || !tile.Terrain.Passable() {
 				continue
 			}
-			return c, true
+			valid = append(valid, c)
+		}
+
+		if len(valid) > 0 {
+			sort.Slice(valid, func(i, j int) bool {
+				di := hex.Distance(valid[i], rp)
+				dj := hex.Distance(valid[j], rp)
+				if di != dj {
+					return di < dj
+				}
+				if valid[i].R != valid[j].R {
+					return valid[i].R < valid[j].R
+				}
+				return valid[i].Q < valid[j].Q
+			})
+			return valid[0], true
 		}
 	}
 	return hex.Coord{}, false

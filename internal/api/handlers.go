@@ -55,6 +55,7 @@ type buildingView struct {
 	BuildTicksTotal          int             `json:"build_ticks_total"`
 	ProductionQueueLen       int             `json:"production_queue_len"`
 	ProductionTicksRemaining int             `json:"production_ticks_remaining"`
+	RallyPointCoord          *coordView      `json:"rally_point_coord,omitempty"`
 	Friendly                 bool            `json:"friendly"`
 }
 
@@ -192,6 +193,7 @@ func (h *stateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			BuildTicksTotal:          b.BuildTicksTotal(),
 			ProductionQueueLen:       b.QueueLen(),
 			ProductionTicksRemaining: b.QueueTicksRemaining(),
+			RallyPointCoord:          toRallyPointCoordView(b.RallyPoint()),
 			Friendly:                 true,
 		})
 	}
@@ -209,6 +211,7 @@ func (h *stateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			BuildTicksTotal:          b.BuildTicksTotal(),
 			ProductionQueueLen:       b.QueueLen(),
 			ProductionTicksRemaining: b.QueueTicksRemaining(),
+			RallyPointCoord:          toRallyPointCoordView(b.RallyPoint()),
 			Friendly:                 false,
 		})
 	}
@@ -283,6 +286,7 @@ func (h *fullStateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				BuildTicksTotal:          b.BuildTicksTotal(),
 				ProductionQueueLen:       b.QueueLen(),
 				ProductionTicksRemaining: b.QueueTicksRemaining(),
+				RallyPointCoord:          toRallyPointCoordView(b.RallyPoint()),
 				Friendly:                 true,
 			})
 		}
@@ -375,7 +379,7 @@ func (h *commandHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	cmd.Team = team
 
 	switch cmd.Kind {
-	case ticker.CmdProduce, ticker.CmdCancelProduce:
+	case ticker.CmdProduce, ticker.CmdCancelProduce, ticker.CmdSetRallyPoint:
 		if cmd.BuildingID == nil {
 			writeError(w, http.StatusBadRequest, "missing_building_id", "building_id is required for "+string(cmd.Kind))
 			return
@@ -452,6 +456,8 @@ func (h *commandHandler) validateCommand(cmd ticker.Command) (int, string, strin
 		return h.validateProduce(cmd)
 	case ticker.CmdCancelProduce:
 		return h.validateCancelProduce(cmd)
+	case ticker.CmdSetRallyPoint:
+		return h.validateSetRallyPoint(cmd)
 	case ticker.CmdDelete:
 		return 0, "", ""
 	case ticker.CmdStop:
@@ -465,6 +471,16 @@ func (h *commandHandler) validateCancelProduce(cmd ticker.Command) (int, string,
 	building := h.w.GetBuilding(*cmd.BuildingID)
 	if building.QueueLen() == 0 {
 		return http.StatusBadRequest, "queue_empty", "building has no units in production queue"
+	}
+	return 0, "", ""
+}
+
+func (h *commandHandler) validateSetRallyPoint(cmd ticker.Command) (int, string, string) {
+	if cmd.TargetCoord == nil {
+		return http.StatusBadRequest, "missing_target_coord", "target_coord is required for SET_RALLY_POINT"
+	}
+	if !hex.InBounds(*cmd.TargetCoord) {
+		return http.StatusBadRequest, "target_out_of_bounds", "target_coord is outside the map"
 	}
 	return 0, "", ""
 }
@@ -759,4 +775,11 @@ func toContestedHexViews(contests []world.ContestedHex) []contestedHexView {
 		})
 	}
 	return out
+}
+
+func toRallyPointCoordView(c *hex.Coord) *coordView {
+	if c == nil {
+		return nil
+	}
+	return &coordView{Q: c.Q, R: c.R}
 }

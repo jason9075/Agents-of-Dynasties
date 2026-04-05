@@ -22,6 +22,7 @@ const (
 	CmdBuild         CommandKind = "BUILD"
 	CmdProduce       CommandKind = "PRODUCE"
 	CmdCancelProduce CommandKind = "CANCEL_PRODUCE"
+	CmdSetRallyPoint CommandKind = "SET_RALLY_POINT"
 	CmdStop          CommandKind = "STOP"
 	CmdDelete        CommandKind = "DELETE"
 )

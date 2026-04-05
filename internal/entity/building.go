@@ -29,6 +29,7 @@ type Building struct {
 	buildProgress   int
 	buildTicksTotal int
 	queue           []ProductionItem
+	rallyPoint      *hex.Coord
 }
 
 type ProductionItem struct {
@@ -76,6 +77,11 @@ func (b *Building) AdvanceConstruction() {
 		return
 	}
 	b.buildProgress++
+}
+
+func (b *Building) RallyPoint() *hex.Coord { return b.rallyPoint }
+func (b *Building) SetRallyPoint(c hex.Coord) {
+	b.rallyPoint = &c
 }
 
 // Enqueue adds a unit kind to the production queue.
