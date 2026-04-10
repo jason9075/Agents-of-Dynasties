@@ -9,16 +9,16 @@ build:
     go build ./...
 
 # Run the server
-run:
-    go run ./cmd/server
+run tick='10s':
+    go run ./cmd/server --tick {{tick}}
 
 # Watch Go and web files; rebuild and restart server on changes
-dev:
+dev tick='1s':
     #!/usr/bin/env bash
     set -euo pipefail
     find . \( -name '*.go' -o -path './web/*' \) \
         -not -path './.git/*' \
-        | entr -r go run ./cmd/server --tick 1s
+        | entr -r go run ./cmd/server --tick {{tick}}
 
 # Run all tests
 test:

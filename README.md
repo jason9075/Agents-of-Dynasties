@@ -23,10 +23,17 @@ Because of that, this README stays high level. More specific rules and implement
 just dev
 ```
 
+Use a custom tick interval when needed:
+
+```bash
+just dev 10s
+just dev 500ms
+```
+
 Or:
 
 ```bash
-go run ./cmd/server
+go run ./cmd/server --tick 10s
 ```
 
 Then open:
